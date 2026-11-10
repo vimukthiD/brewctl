@@ -1,0 +1,8 @@
+.task
+.wails
+bin
+frontend/dist
+frontend/node_modules
+mcp/
+.DS_Store
+frontend/bindings
