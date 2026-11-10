@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowUpCircle, Beer, LayoutDashboard, Package, RefreshCw, Search, Sparkles, TerminalSquare, X } from "lucide-react";
+import { ArrowUpCircle, Beer, Compass, LayoutDashboard, Package, RefreshCw, Search, Sparkles, TerminalSquare, X } from "lucide-react";
 import { Button, CommandHint, ConfirmDialog, Spinner, Toasts } from "./components";
 import { Drawer } from "./Drawer";
 import { UninstallDialog } from "./UninstallDialog";
@@ -7,6 +7,8 @@ import { isActive, openURL, timeAgo } from "./lib/api";
 import { useBrew, type View } from "./state";
 import { Activity } from "./views/Activity";
 import { Cleanup } from "./views/Cleanup";
+import { Discover } from "./views/Discover";
+import { RemoteDrawer } from "./RemoteDrawer";
 import { Installed } from "./views/Installed";
 import { Overview } from "./views/Overview";
 import { Updates } from "./views/Updates";
@@ -14,6 +16,7 @@ import { Updates } from "./views/Updates";
 const NAV: { id: View; label: string; icon: typeof Package }[] = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
   { id: "installed", label: "Installed", icon: Package },
+  { id: "discover", label: "Discover", icon: Compass },
   { id: "updates", label: "Updates", icon: ArrowUpCircle },
   { id: "cleanup", label: "Cleanup", icon: Sparkles },
   { id: "activity", label: "Activity", icon: TerminalSquare },
@@ -22,6 +25,7 @@ const NAV: { id: View; label: string; icon: typeof Package }[] = [
 const TITLES: Record<View, string> = {
   overview: "Overview",
   installed: "Installed",
+  discover: "Discover",
   updates: "Updates",
   cleanup: "Cleanup",
   activity: "Activity",
@@ -29,7 +33,11 @@ const TITLES: Record<View, string> = {
 
 export default function App() {
   const b = useBrew();
-  const [query, setQuery] = useState("");
+  const [installedQuery, setInstalledQuery] = useState("");
+  const [discoverQuery, setDiscoverQuery] = useState("");
+  const searching = b.view === "discover" ? "discover" : "installed";
+  const query = searching === "discover" ? discoverQuery : installedQuery;
+  const setQuery = searching === "discover" ? setDiscoverQuery : setInstalledQuery;
   const searchRef = useRef<HTMLInputElement>(null);
   const [, setTick] = useState(0);
 
@@ -45,12 +53,12 @@ export default function App() {
       const k = e.key.toLowerCase();
       if (k === "k" || k === "f") {
         e.preventDefault();
-        b.setView("installed");
+        if (b.view !== "discover") b.setView("installed");
         requestAnimationFrame(() => searchRef.current?.select());
       } else if (k === "r") {
         e.preventDefault();
         b.refresh();
-      } else if (k >= "1" && k <= "5") {
+      } else if (k >= "1" && k <= "6") {
         e.preventDefault();
         b.setView(NAV[Number(k) - 1].id);
       }
@@ -104,6 +112,9 @@ export default function App() {
                 {active.length > 1 && <span className="now-more">+{active.length - 1}</span>}
               </span>
               <span className="now-line">{lastLine ?? "Starting…"}</span>
+              <span className="progress-steps" aria-hidden>
+                <span className="is-now" />
+              </span>
             </button>
           )}
           {b.status?.found && (
@@ -119,10 +130,11 @@ export default function App() {
       </nav>
 
       <main className="main">
+        <div className="main-col">
         <header className="topbar">
           <h1>{TITLES[b.view]}</h1>
           <span className="grow" />
-          {b.view === "installed" && (
+          {(b.view === "installed" || b.view === "discover") && (
             <label className="search">
               <Search size={14} aria-hidden />
               <input
@@ -136,8 +148,8 @@ export default function App() {
                     else e.currentTarget.blur();
                   }
                 }}
-                placeholder="Search installed"
-                aria-label="Search installed packages"
+                placeholder={searching === "discover" ? "Search Homebrew" : "Search installed"}
+                aria-label={searching === "discover" ? "Search all Homebrew packages" : "Search installed packages"}
                 spellCheck={false}
                 autoComplete="off"
               />
@@ -198,14 +210,17 @@ export default function App() {
                 </div>
               )}
               {b.view === "overview" && <Overview />}
-              {b.view === "installed" && <Installed query={query} />}
+              {b.view === "installed" && <Installed query={installedQuery} />}
+              {b.view === "discover" && <Discover query={discoverQuery} setQuery={setDiscoverQuery} focusSearch={() => searchRef.current?.focus()} />}
               {b.view === "updates" && <Updates />}
               {b.view === "cleanup" && <Cleanup />}
               {b.view === "activity" && <Activity />}
             </>
           )}
         </div>
+        </div>
         <Drawer />
+        <RemoteDrawer />
       </main>
 
       <Toasts />

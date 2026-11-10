@@ -16,6 +16,8 @@ doubles as a cheat sheet.
   leave behind (cached download, config under the Homebrew prefix, a cask's own
   files, same-named folders in your home) and clears what you tick. Everything
   except Homebrew's own download goes to the Trash.
+- **Discover**: search every tool and app in Homebrew by name or description,
+  see what else it would install, and install it.
 - **Updates**: check for updates, upgrade one or all.
 - **Cleanup**: unused dependencies, old versions, the download cache.
 - **Activity**: live output of every command the app runs.

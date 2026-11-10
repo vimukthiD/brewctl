@@ -165,3 +165,32 @@ func TestRemovableGuards(t *testing.T) {
 		}
 	}
 }
+
+func TestParseDescAndRank(t *testing.T) {
+	out := `==> Formulae
+code-cli: Command-line interface built-in Visual Studio Code
+ripgrep-all: Wrapper around ripgrep that adds multiple rich file types
+ripgrep: Search tool like grep and The Silver Searcher
+nodesc: [no description]
+
+==> Casks
+visual-studio-code: (Microsoft Visual Studio Code, VS Code) Open-source code editor
+plain-cask: Just a description
+--bad: flag-looking name is dropped
+`
+	rs := parseDesc(out)
+	if len(rs) != 6 {
+		t.Fatalf("got %d results: %+v", len(rs), rs)
+	}
+	vs := rs[4]
+	if vs.Kind != "cask" || vs.DisplayName != "Microsoft Visual Studio Code" || vs.Desc != "Open-source code editor" {
+		t.Errorf("cask parse: %+v", vs)
+	}
+	if rs[3].Desc != "" || rs[5].DisplayName != "plain-cask" {
+		t.Errorf("edge cases: %+v %+v", rs[3], rs[5])
+	}
+	rankResults(rs, "ripgrep")
+	if rs[0].Name != "ripgrep" || rs[1].Name != "ripgrep-all" {
+		t.Errorf("rank: %s, %s", rs[0].Name, rs[1].Name)
+	}
+}

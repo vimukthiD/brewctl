@@ -15,16 +15,18 @@ import {
   formatBytes,
   isActive,
   plural,
+  refKey,
   toCleanup,
   toJob,
   toPkg,
   type CleanupPreview,
   type Job,
   type Pkg,
+  type Ref,
   type Status,
 } from "./lib/api";
 
-export type View = "overview" | "installed" | "updates" | "cleanup" | "activity";
+export type View = "overview" | "installed" | "discover" | "updates" | "cleanup" | "activity";
 
 export interface ConfirmOptions {
   title: string;
@@ -55,6 +57,8 @@ interface Ctx {
   error: string | null;
   fetchedAt: number | null;
   busy: Set<string>;
+  /** The queued or running job acting on this package, if any. */
+  jobFor: (key: string) => Job | null;
   refresh: () => Promise<void>;
 
   view: View;
@@ -64,6 +68,10 @@ interface Ctx {
   focusJob: number | null;
   showJob: (id: number) => void;
 
+  /** A catalogue package shown in the side panel (not installed yet). */
+  remote: Ref | null;
+  showRemote: (r: Ref | null) => void;
+  install: (r: Ref) => Promise<void>;
   upgrade: (pkgs: Pkg[]) => Promise<void>;
   /** Uninstalls p, then clears the given leftover paths once that succeeds. */
   uninstall: (p: Pkg, leftovers?: string[]) => Promise<void>;
@@ -111,6 +119,7 @@ export function BrewProvider({ children }: { children: ReactNode }) {
   const [confirming, setConfirming] = useState<Ctx["confirming"]>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
+  const [remote, setRemote] = useState<Ref | null>(null);
   const [uninstallTarget, setUninstallTarget] = useState<Pkg | null>(null);
   const pendingLeftovers = useRef<Record<number, { name: string; kind: string; paths: string[] }>>({});
 
@@ -208,6 +217,8 @@ export function BrewProvider({ children }: { children: ReactNode }) {
       }
       if (raw.status === "done") {
         if (raw.mutates) toast({ tone: "ok", text: `${raw.title} — done`, jobId: raw.id });
+      } else if (raw.status === "cancelled" && raw.startedAt) {
+        toast({ tone: "info", text: `${raw.title} — stopped` });
       } else if (raw.status === "failed") {
         toast({
           tone: "error",
@@ -258,6 +269,15 @@ export function BrewProvider({ children }: { children: ReactNode }) {
   }, [pkgs]);
 
   const busy = useMemo(() => new Set(Object.values(busyByJob).flat()), [busyByJob]);
+  const jobFor = useCallback(
+    (key: string) => {
+      for (const [id, keys] of Object.entries(busyByJob)) {
+        if (keys.includes(key)) return jobs.find((j) => j.id === Number(id)) ?? null;
+      }
+      return null;
+    },
+    [busyByJob, jobs],
+  );
 
   const selected = useMemo(
     () => (selectedKey ? pkgs.find((p) => p.key === selectedKey) ?? null : null),
@@ -292,6 +312,15 @@ export function BrewProvider({ children }: { children: ReactNode }) {
         });
       }),
     [],
+  );
+
+  const install = useCallback(
+    (r: Ref) =>
+      guard(async () => {
+        const job = await Brew.Install({ name: r.name, kind: r.kind });
+        track(job, [refKey(r)]);
+      }),
+    [guard, track],
   );
 
   const upgrade = useCallback(
@@ -336,6 +365,7 @@ export function BrewProvider({ children }: { children: ReactNode }) {
   const showJob = useCallback((id: number) => {
     setFocusJob(id);
     setSelectedKey(null);
+    setRemote(null);
     setView("activity");
   }, []);
   const doctor = useCallback(
@@ -362,6 +392,7 @@ export function BrewProvider({ children }: { children: ReactNode }) {
     error,
     fetchedAt,
     busy,
+    jobFor,
     refresh,
     view,
     setView: (v) => {
@@ -369,7 +400,16 @@ export function BrewProvider({ children }: { children: ReactNode }) {
       if (v !== "activity") setFocusJob(null);
     },
     selected,
-    select: setSelectedKey,
+    select: (key) => {
+      setSelectedKey(key);
+      if (key) setRemote(null);
+    },
+    remote,
+    showRemote: (r) => {
+      setRemote(r);
+      if (r) setSelectedKey(null);
+    },
+    install,
     focusJob,
     showJob,
     upgrade,

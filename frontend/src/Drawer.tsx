@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ArrowUpCircle, ExternalLink, Pin, PinOff, Trash2, X } from "lucide-react";
-import { Button, CommandHint, PkgTags } from "./components";
+import { Button, CommandHint, JobProgress, PkgTags } from "./components";
 import { formatBytes, formatDate, openURL, timeAgo } from "./lib/api";
 import { useBrew } from "./state";
 
@@ -22,7 +22,7 @@ function DepChips({ names, empty }: { names: string[]; empty: string }) {
 }
 
 export function Drawer() {
-  const { selected: p, select, sizes, usedBy, upgrade, setPinned, busy, confirming, uninstallTarget, requestUninstall } = useBrew();
+  const { selected: p, select, sizes, usedBy, upgrade, setPinned, busy, jobFor, confirming, uninstallTarget, requestUninstall } = useBrew();
   const [showAll, setShowAll] = useState(false);
 
   useEffect(() => setShowAll(false), [p?.key]);
@@ -41,6 +41,7 @@ export function Drawer() {
   const dependents = p.kind === "formula" ? usedBy.get(p.short) ?? [] : [];
   const indirect = p.allDeps.filter((d) => !p.deps.includes(d));
   const isBusy = busy.has(p.key);
+  const activeJob = jobFor(p.key);
   const flag = p.kind === "cask" ? "--cask " : "";
 
   return (
@@ -137,6 +138,7 @@ export function Drawer() {
         <CommandHint command={`brew info ${flag}${p.name}`} />
       </div>
 
+      {activeJob && <JobProgress job={activeJob} />}
       <footer className="drawer-foot">
         {p.outdated && !p.pinned && (
           <Button variant="primary" icon={<ArrowUpCircle size={15} />} busy={isBusy} onClick={() => upgrade([p])}>

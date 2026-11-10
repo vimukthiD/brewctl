@@ -5,11 +5,25 @@ import type {
   Job as RawJob,
   CleanupPreview as RawCleanup,
   Leftover,
+  SearchResult,
+  Remote as RawRemote,
 } from "../../bindings/dev.vimukthid/brewctl/internal/brew/models";
 import type { Status } from "../../bindings/dev.vimukthid/brewctl/models";
 
 export { Brew };
-export type { Status, Leftover };
+export type { Status, Leftover, SearchResult };
+
+export interface Remote extends Omit<RawRemote, "deps" | "kind"> {
+  kind: Kind;
+  deps: string[];
+}
+
+export interface Ref {
+  name: string;
+  kind: Kind;
+}
+
+export const refKey = (r: { name: string; kind: string }) => `${r.kind}:${r.name}`;
 
 export type Kind = "formula" | "cask";
 

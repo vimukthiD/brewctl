@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
 import { AlertTriangle, Check, Copy, Loader2, X } from "lucide-react";
-import { copyText, type Pkg } from "./lib/api";
+import { copyText, duration, type Job, type Pkg } from "./lib/api";
 import { useBrew } from "./state";
 
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
@@ -189,6 +189,70 @@ export function Toasts() {
           </button>
         </div>
       ))}
+    </div>
+  );
+}
+
+const STEPS = ["Downloading", "Installing", "Finishing up"];
+
+/** How far an install or upgrade has got, read from brew's own output. */
+function stepOf(lines: string[]): number {
+  let step = 0;
+  for (const l of lines) {
+    if (/^==> (Caveats|Summary|Cleanup|Running `brew cleanup)|^\u{1F37A}|successfully (installed|upgraded)/u.test(l)) step = Math.max(step, 2);
+    else if (/^==> (Pouring|Installing|Upgrading|Moving|Linking|Running)/.test(l)) step = Math.max(step, 1);
+  }
+  return step;
+}
+
+/**
+ * Live progress for the job acting on a package. Homebrew doesn't report a
+ * percentage, so installs and upgrades show which stage they're in and other
+ * jobs show a plain activity bar, always with the latest line of output.
+ */
+export function JobProgress({ job }: { job: Job }) {
+  const { showJob, cancelJob } = useBrew();
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const t = window.setInterval(() => setTick((n) => n + 1), 1000);
+    return () => window.clearInterval(t);
+  }, []);
+
+  const queued = job.status === "queued";
+  const staged = /^brew (install|upgrade) /.test(job.command);
+  const step = staged ? stepOf(job.output) : 0;
+  const last = job.output[job.output.length - 1];
+  const label = queued ? "Waiting for another job to finish" : staged ? STEPS[step] : job.title;
+
+  return (
+    <div className="progress" role="status" aria-live="polite">
+      <div className="progress-head">
+        <strong>
+          {label}
+          {!queued && "…"}
+        </strong>
+        {!queued && <span className="progress-time">{duration(job)}</span>}
+      </div>
+      {staged ? (
+        <div className="progress-steps" aria-hidden>
+          {STEPS.map((s, i) => (
+            <span key={s} className={queued ? "" : i < step ? "is-done" : i === step ? "is-now" : ""} />
+          ))}
+        </div>
+      ) : (
+        <div className="progress-steps" aria-hidden>
+          <span className={queued ? "" : "is-now"} />
+        </div>
+      )}
+      <div className="progress-line">{queued ? "Homebrew runs one change at a time." : last ?? "Starting…"}</div>
+      <div className="progress-actions">
+        <button type="button" className="more" onClick={() => showJob(job.id)}>
+          Show full output
+        </button>
+        <button type="button" className="more more-quiet" onClick={() => cancelJob(job.id)}>
+          {queued ? "Remove from queue" : "Stop"}
+        </button>
+      </div>
     </div>
   );
 }

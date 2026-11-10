@@ -306,3 +306,37 @@ func (s *BrewService) RemoveLeftovers(ctx context.Context, p PkgRef, paths []str
 	}
 	return c.RemoveLeftovers(ctx, allowed, paths), nil
 }
+
+// Search finds installable packages by name or description.
+func (s *BrewService) Search(ctx context.Context, query string) ([]brew.SearchResult, error) {
+	c, _, err := s.ready(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return c.Search(ctx, query)
+}
+
+// Info describes a package from the catalogue, installed or not.
+func (s *BrewService) Info(ctx context.Context, p PkgRef) (*brew.Remote, error) {
+	c, _, err := s.ready(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkRef(p); err != nil {
+		return nil, err
+	}
+	return c.Info(ctx, p.Name, p.Kind)
+}
+
+// Install installs a formula or cask.
+func (s *BrewService) Install(ctx context.Context, p PkgRef) (brew.Job, error) {
+	_, r, err := s.ready(ctx)
+	if err != nil {
+		return brew.Job{}, err
+	}
+	if err := checkRef(p); err != nil {
+		return brew.Job{}, err
+	}
+	flag, _ := kindFlag(p.Kind)
+	return r.Enqueue("Install "+p.Name, true, "install", flag, p.Name), nil
+}
