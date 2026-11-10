@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
 import { AlertTriangle, Check, Copy, Loader2, X } from "lucide-react";
-import { copyText, duration, type Job, type Pkg } from "./lib/api";
+import { copyText, duration, vulnLabel, type Job, type Pkg } from "./lib/api";
 import { useBrew } from "./state";
 
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
@@ -74,8 +74,15 @@ export function Empty({ icon, title, children }: { icon: ReactNode; title: strin
 }
 
 export function PkgTags({ p }: { p: Pkg }) {
+  const { vulnBy } = useBrew();
+  const finding = p.kind === "formula" ? vulnBy.get(p.short) : undefined;
   return (
     <>
+      {finding && (
+        <Tag tone="red" title={`${vulnLabel(finding)} in this version`}>
+          vulnerable
+        </Tag>
+      )}
       {p.kind === "cask" && <Tag tone="blue">app</Tag>}
       {p.outdated && <Tag tone="accent">update</Tag>}
       {p.pinned && <Tag title="Pinned: upgrades skip this package">pinned</Tag>}

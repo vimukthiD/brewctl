@@ -7,12 +7,23 @@ import type {
   Leftover,
   SearchResult,
   Service,
+  Finding,
+  Vuln,
   Remote as RawRemote,
 } from "../../bindings/dev.vimukthid/brewctl/internal/brew/models";
-import type { Status } from "../../bindings/dev.vimukthid/brewctl/models";
+import type { Status, SecurityState } from "../../bindings/dev.vimukthid/brewctl/models";
 
 export { Brew };
-export type { Status, Leftover, SearchResult, Service };
+export type { Status, Leftover, SearchResult, Service, Finding, Vuln, SecurityState };
+
+/** "3 known vulnerabilities", for a finding. */
+export function vulnLabel(f: Finding): string {
+  const n = (f.vulns ?? []).length;
+  return `${n} known ${n === 1 ? "vulnerability" : "vulnerabilities"}`;
+}
+
+/** Homebrew versions carry a rebuild suffix ("1.2.3_1") that scans leave off. */
+export const sameVersion = (installed: string, scanned: string) => installed.replace(/_\d+$/, "") === scanned.replace(/_\d+$/, "");
 
 export type ServiceVerb = "start" | "run" | "stop" | "restart";
 

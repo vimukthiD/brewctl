@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ArrowUpCircle, ExternalLink, Pin, PinOff, Trash2, X } from "lucide-react";
 import { Button, CommandHint, JobProgress, PkgTags } from "./components";
-import { formatBytes, formatDate, openURL, timeAgo } from "./lib/api";
+import { formatBytes, formatDate, openURL, timeAgo, vulnLabel } from "./lib/api";
 import { useBrew } from "./state";
 
 function DepChips({ names, empty }: { names: string[]; empty: string }) {
@@ -22,7 +22,7 @@ function DepChips({ names, empty }: { names: string[]; empty: string }) {
 }
 
 export function Drawer() {
-  const { selected: p, select, sizes, usedBy, upgrade, setPinned, busy, jobFor, confirming, uninstallTarget, requestUninstall, services, setView } = useBrew();
+  const { selected: p, select, sizes, usedBy, upgrade, setPinned, busy, jobFor, confirming, uninstallTarget, requestUninstall, services, setView, vulnBy } = useBrew();
   const [showAll, setShowAll] = useState(false);
 
   useEffect(() => setShowAll(false), [p?.key]);
@@ -109,6 +109,14 @@ export function Drawer() {
                 ? "Installed automatically, because other packages need it."
                 : "Installed automatically, and nothing needs it any more."}
         </div>
+
+        {p.kind === "formula" && vulnBy.get(p.short) && (
+          <button type="button" className="svc-link" onClick={() => setView("security")}>
+            <span className="svc-dot is-error" aria-hidden />
+            <span>{vulnLabel(vulnBy.get(p.short)!)} in this version</span>
+            <span className="svc-go">Review</span>
+          </button>
+        )}
 
         {service && (
           <button type="button" className="svc-link" onClick={() => setView("services")}>

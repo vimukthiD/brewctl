@@ -19,7 +19,10 @@ import {
   toCleanup,
   toJob,
   toPkg,
+  sameVersion,
   type CleanupPreview,
+  type Finding,
+  type SecurityState,
   type Job,
   type Pkg,
   type Ref,
@@ -28,7 +31,7 @@ import {
   type Status,
 } from "./lib/api";
 
-export type View = "overview" | "installed" | "discover" | "updates" | "services" | "cleanup" | "activity";
+export type View = "overview" | "installed" | "discover" | "updates" | "security" | "services" | "cleanup" | "activity";
 
 export interface ConfirmOptions {
   title: string;
@@ -56,6 +59,14 @@ interface Ctx {
   /** Background services; null until first loaded. */
   services: Service[] | null;
   serviceAction: (name: string, action: ServiceVerb) => Promise<void>;
+  /** The last vulnerability check; null until loaded. */
+  security: SecurityState | null;
+  /** Findings that still apply to what's installed right now. */
+  vulnFindings: Finding[];
+  /** The same findings by short package name. */
+  vulnBy: Map<string, Finding>;
+  scanSecurity: () => Promise<void>;
+  setSecurityMonitor: (on: boolean) => Promise<void>;
   jobs: Job[];
   loading: boolean;
   refreshing: boolean;
@@ -113,6 +124,7 @@ export function BrewProvider({ children }: { children: ReactNode }) {
   const [cacheSize, setCacheSize] = useState<number | null>(null);
   const [cleanup, setCleanup] = useState<CleanupPreview | null>(null);
   const [services, setServices] = useState<Service[] | null>(null);
+  const [security, setSecurity] = useState<SecurityState | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -192,6 +204,14 @@ export function BrewProvider({ children }: { children: ReactNode }) {
     Brew.Jobs()
       .then((js) => setJobs((cur) => (cur.length ? cur : (js ?? []).map(toJob))))
       .catch(() => {});
+
+    Brew.Security()
+      .then((s) => setSecurity(s))
+      .catch(() => {});
+    const offSecurity = Events.On("security:update", (ev: { data: unknown }) => {
+      const s = (Array.isArray(ev.data) ? ev.data[0] : ev.data) as SecurityState;
+      if (s && typeof s.scanning === "boolean") setSecurity(s);
+    });
 
     let refreshTimer: number | undefined;
     const offUpdate = Events.On("job:update", (ev: { data: unknown }) => {
@@ -273,6 +293,7 @@ export function BrewProvider({ children }: { children: ReactNode }) {
       window.clearTimeout(refreshTimer);
       offUpdate();
       offOutput();
+      offSecurity();
     };
   }, [refresh, toast]);
 
@@ -281,6 +302,22 @@ export function BrewProvider({ children }: { children: ReactNode }) {
     for (const p of pkgs) if (p.kind === "formula") m.set(p.short, p);
     return m;
   }, [pkgs]);
+
+  // A finding is about one exact version: once the package is upgraded or
+  // removed it no longer applies, even before the next check.
+  const vulnFindings = useMemo(
+    () =>
+      (security?.report?.findings ?? []).filter((f) => {
+        const p = byShort.get(f.formula.slice(f.formula.lastIndexOf("/") + 1));
+        return !!p && sameVersion(p.version, f.version) && (f.vulns ?? []).length > 0;
+      }),
+    [security, byShort],
+  );
+  const vulnBy = useMemo(() => {
+    const m = new Map<string, Finding>();
+    for (const f of vulnFindings) m.set(f.formula.slice(f.formula.lastIndexOf("/") + 1), f);
+    return m;
+  }, [vulnFindings]);
 
   const usedBy = useMemo(() => {
     const m = new Map<string, string[]>();
@@ -358,6 +395,9 @@ export function BrewProvider({ children }: { children: ReactNode }) {
     [guard, track],
   );
 
+  const scanSecurity = useCallback(() => guard(async () => setSecurity(await Brew.SecurityScan())), [guard]);
+  const setSecurityMonitor = useCallback((on: boolean) => guard(async () => setSecurity(await Brew.SetSecurityMonitor(on))), [guard]);
+
   const upgrade = useCallback(
     (list: Pkg[]) =>
       guard(async () => {
@@ -423,6 +463,11 @@ export function BrewProvider({ children }: { children: ReactNode }) {
     cleanup,
     services,
     serviceAction,
+    security,
+    vulnFindings,
+    vulnBy,
+    scanSecurity,
+    setSecurityMonitor,
     jobs,
     loading,
     refreshing,
@@ -433,6 +478,12 @@ export function BrewProvider({ children }: { children: ReactNode }) {
     refresh,
     view,
     setView: (v) => {
+      // Leaving Security means the "new" marks have been seen.
+      if (view === "security" && v !== "security" && vulnFindings.some((f) => (f.vulns ?? []).some((x) => x.new))) {
+        Brew.SecurityAcknowledge()
+          .then((s) => setSecurity(s))
+          .catch(() => {});
+      }
       setView(v);
       if (v !== "activity") setFocusJob(null);
     },

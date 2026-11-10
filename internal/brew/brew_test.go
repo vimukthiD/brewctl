@@ -261,3 +261,78 @@ func TestTailFile(t *testing.T) {
 		t.Errorf("tail drops the partial line: %q", got)
 	}
 }
+
+func TestParseVulns(t *testing.T) {
+	out := []byte(`{"findings":[
+	  {"formula":"aaa","version":"1.0","repo_url":"https://example.com/aaa","vulnerabilities":[
+	    {"id":"CVE-1","severity":"UNKNOWN","summary":" one ","aliases":[],"fixed_versions":["abc"]},
+	    {"id":"CVE-2","severity":"HIGH","summary":"two","aliases":[],"fixed_versions":[]}],"patched":[]},
+	  {"formula":"only-patched","version":"2.0","vulnerabilities":[],"patched":[{"id":"CVE-3","severity":"HIGH"}]},
+	  {"formula":"zzz","version":"3.0","vulnerabilities":[{"id":"CVE-4","severity":"CRITICAL","summary":"four"}],"patched":[]}],
+	  "skipped_formulae":["b","a"],"checked":7,"complete":false}`)
+	rep, err := parseVulns(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Findings) != 2 || rep.Findings[0].Formula != "zzz" || rep.Findings[1].Formula != "aaa" {
+		t.Fatalf("findings: %+v", rep.Findings)
+	}
+	a := rep.Findings[1]
+	if a.Vulns[0].ID != "CVE-2" || a.Vulns[0].Severity != "high" || a.Vulns[1].Severity != "" || a.Vulns[1].Summary != "one" {
+		t.Errorf("vulns not normalised or sorted: %+v", a.Vulns)
+	}
+	if rep.Checked != 7 || rep.Patched != 1 || !reflect.DeepEqual(rep.Skipped, []string{"a", "b"}) {
+		t.Errorf("report: %+v", rep)
+	}
+	if _, err := parseVulns([]byte(`Error: no such command`)); err == nil {
+		t.Error("garbage should not parse")
+	}
+	if _, err := parseVulns([]byte(`{}`)); err == nil {
+		t.Error("an empty object is not a report")
+	}
+}
+
+func TestSecurityStore(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sub", "security.json")
+	report := func(at int64, ids ...string) *VulnReport {
+		f := Finding{Formula: "pkg", Version: "1"}
+		for _, id := range ids {
+			f.Vulns = append(f.Vulns, Vuln{ID: id})
+		}
+		return &VulnReport{CheckedAt: at, Findings: []Finding{f}}
+	}
+	s := OpenSecurityStore(path)
+	if s.Report() != nil || s.Monitor() {
+		t.Fatal("a new store should be empty with monitoring off")
+	}
+	if fresh := s.Record(report(100, "A")); len(fresh) != 0 {
+		t.Errorf("the first scan is the baseline, got new: %+v", fresh)
+	}
+	fresh := s.Record(report(200, "A", "B"))
+	if len(fresh) != 1 || len(fresh[0].Vulns) != 1 || fresh[0].Vulns[0].ID != "B" {
+		t.Fatalf("want only B as new, got %+v", fresh)
+	}
+	s.SetMonitor(true)
+
+	// Survives a restart.
+	s = OpenSecurityStore(path)
+	v := s.Report().Findings[0].Vulns
+	if !s.Monitor() || v[0].New || !v[1].New || v[0].FirstSeen != 100 || v[1].FirstSeen != 200 {
+		t.Errorf("after reload: monitor=%v vulns=%+v", s.Monitor(), v)
+	}
+	if fresh := s.Record(report(300, "A", "B")); len(fresh) != 0 {
+		t.Errorf("nothing changed, got new: %+v", fresh)
+	}
+	if !s.Report().Findings[0].Vulns[1].New {
+		t.Error("B should stay new until acknowledged")
+	}
+	s.Acknowledge()
+	if s.Report().Findings[0].Vulns[1].New {
+		t.Error("acknowledged vulnerabilities are no longer new")
+	}
+	// Fixed, then back: counts as new again.
+	s.Record(report(400, "A"))
+	if fresh := s.Record(report(500, "A", "B")); len(fresh) != 1 {
+		t.Errorf("a returning vulnerability should be new, got %+v", fresh)
+	}
+}

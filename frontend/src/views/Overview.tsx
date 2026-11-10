@@ -20,7 +20,7 @@ function CountStat(props: { label: string; n: number; hint: string; tone?: "acce
 }
 
 export function Overview() {
-  const { pkgs, sizes, cacheSize, cleanup, setView, select, upgrade, busy, doctor, loading } = useBrew();
+  const { pkgs, sizes, cacheSize, cleanup, setView, select, upgrade, busy, doctor, loading, security, vulnFindings } = useBrew();
 
   const groups = useMemo(() => {
     const requested = pkgs.filter((p) => p.kind === "formula" && p.onRequest);
@@ -180,10 +180,17 @@ export function Overview() {
                 <span>Download cache</span>
                 <b>{formatBytes(cacheSize)}</b>
               </li>
+              <li>
+                <span>Tools with known vulnerabilities</span>
+                <b className={vulnFindings.length ? "is-alert" : ""}>{!security ? "…" : !security.report ? "Not checked" : vulnFindings.length}</b>
+              </li>
             </ul>
             <div className="card-actions">
               <Button size="sm" onClick={() => setView("cleanup")}>
                 Review cleanup
+              </Button>
+              <Button size="sm" onClick={() => setView("security")}>
+                Security
               </Button>
               <Button size="sm" variant="ghost" icon={<Stethoscope size={14} />} onClick={doctor}>
                 Run health check
