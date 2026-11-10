@@ -61,3 +61,7 @@ needs a Developer ID signature and notarization (`wails3 setup`, then
 | `frontend/src/` | React UI: `state.tsx` holds the data, `views/` the five screens |
 | `build/` | Icons, Info.plist and packaging tasks |
 | `tools/icon/` | Draws `build/appicon.png` (`go run ./tools/icon build/appicon.png`) |
+
+## License
+
+[MIT](LICENSE)

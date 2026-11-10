@@ -6,3 +6,4 @@ frontend/node_modules
 mcp/
 .DS_Store
 frontend/bindings
+.claude/settings.local.json
