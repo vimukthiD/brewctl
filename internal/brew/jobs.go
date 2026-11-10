@@ -33,6 +33,7 @@ type Job struct {
 	Command   string   `json:"command"`
 	Status    string   `json:"status"`
 	NeedsSudo bool     `json:"needsSudo"`
+	SudoIssue string   `json:"sudoIssue"` // why sudo failed, see the Sudo* constants
 	Mutates   bool     `json:"mutates"`
 	QueuedAt  int64    `json:"queuedAt"`
 	StartedAt int64    `json:"startedAt"`
@@ -192,6 +193,13 @@ func (r *Runner) run(j *Job) {
 	r.emit("job:update", meta)
 
 	cmd := r.client.command(ctx, j.args...)
+	if j.Mutates {
+		// Lets brew ask for the admin password through a macOS dialog.
+		if helper, cleanup, err := newAskpass(j.Title, r.client.IconPath, askpassGiveUp); err == nil {
+			defer cleanup()
+			cmd.Env = append(cmd.Env, "SUDO_ASKPASS="+helper)
+		}
+	}
 	// Own process group, so cancelling also stops whatever brew spawned.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
@@ -317,8 +325,13 @@ func (r *Runner) pump(j *Job, rd io.Reader) {
 func (r *Runner) appendLines(j *Job, lines []string) {
 	r.mu.Lock()
 	for _, l := range lines {
-		if needsSudo(l) {
+		if issue := sudoIssue(l); issue != "" {
 			j.NeedsSudo = true
+			// A wrong password is followed by "no password was provided" if
+			// the retry is cancelled; keep the first, more specific reason.
+			if j.SudoIssue == "" || issue == SudoWrong {
+				j.SudoIssue = issue
+			}
 		}
 	}
 	j.Output = append(j.Output, lines...)
@@ -327,19 +340,6 @@ func (r *Runner) appendLines(j *Job, lines []string) {
 	}
 	r.mu.Unlock()
 	r.emit("job:output", JobOutput{ID: j.ID, Lines: lines})
-}
-
-func needsSudo(line string) bool {
-	if !strings.Contains(line, "sudo") {
-		return false
-	}
-	for _, s := range []string{"a terminal is required", "a password is required",
-		"no askpass program", "no tty present"} {
-		if strings.Contains(line, s) {
-			return true
-		}
-	}
-	return false
 }
 
 // stripANSI removes terminal escape sequences.

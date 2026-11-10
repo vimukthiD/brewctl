@@ -79,6 +79,20 @@ export function toCleanup(c: RawCleanup | null): CleanupPreview {
   return { orphans: c?.orphans ?? [], items: c?.items ?? [], summary: c?.summary ?? "" };
 }
 
+/** What to tell the user when a job that needed their password didn't get it. */
+export function sudoMessage(j: Job): { title: string; body: string } {
+  switch (j.sudoIssue) {
+    case "cancelled":
+      return { title: "The password prompt was cancelled.", body: "Nothing was changed. Run it again when you're ready, or use Terminal:" };
+    case "wrong":
+      return { title: "That password wasn't accepted.", body: "It's the one you use to log in to this Mac. Run it again, or use Terminal:" };
+    case "notadmin":
+      return { title: "This account can't make system changes.", body: "It needs an administrator account on this Mac. From an admin account, run:" };
+    default:
+      return { title: "This needed your admin password.", body: "Brewctl couldn't ask for it. Run the same command in Terminal:" };
+  }
+}
+
 export const isActive = (j: Job) => j.status === "queued" || j.status === "running";
 
 export function openURL(url: string) {

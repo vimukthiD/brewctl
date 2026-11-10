@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -35,12 +36,46 @@ func TestStripANSI(t *testing.T) {
 	}
 }
 
-func TestNeedsSudo(t *testing.T) {
-	if !needsSudo("sudo: a terminal is required to read the password; either use the -S option") {
-		t.Error("terminal-required message not detected")
+func TestSudoIssue(t *testing.T) {
+	for line, want := range map[string]string{
+		"sudo: a terminal is required to read the password; either use the -S option": SudoUnavailable,
+		"sudo: no password was provided":                                              SudoCancelled,
+		"sudo: 3 incorrect password attempts":                                         SudoWrong,
+		"someone is not in the sudoers file.":                                         SudoNotAdmin,
+		"sudo: someone is not allowed to run sudo on this Mac":                        SudoNotAdmin,
+		"==> Running sudo-free install":                                               "",
+		"==> Pouring hello":                                                           "",
+	} {
+		if got := sudoIssue(line); got != want {
+			t.Errorf("sudoIssue(%q) = %q, want %q", line, got, want)
+		}
 	}
-	if needsSudo("==> Running sudo-free install") {
-		t.Error("false positive")
+}
+
+func TestAskpassHelper(t *testing.T) {
+	// A reason with quotes must survive both the shell and AppleScript.
+	helper, cleanup, err := newAskpass(`Install it's "odd"`, `/tmp/My "App"/icons.icns`, 300)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(helper)
+	if err != nil || info.Mode().Perm() != 0o700 {
+		t.Fatalf("helper mode = %v, err = %v", info.Mode().Perm(), err)
+	}
+	if dir, _ := os.Stat(filepath.Dir(helper)); dir.Mode().Perm() != 0o700 {
+		t.Errorf("helper dir mode = %v", dir.Mode().Perm())
+	}
+	body, _ := os.ReadFile(helper)
+	if !strings.Contains(string(body), `it'\''s`) {
+		t.Errorf("reason not shell-quoted: %s", body)
+	}
+	scpt, _ := os.ReadFile(filepath.Join(filepath.Dir(helper), "prompt.applescript"))
+	if !strings.Contains(string(scpt), `POSIX file "/tmp/My \"App\"/icons.icns"`) || strings.Contains(string(scpt), "odd") {
+		t.Errorf("script: %s", scpt)
+	}
+	cleanup()
+	if _, err := os.Stat(helper); err == nil {
+		t.Error("helper not removed")
 	}
 }
 
@@ -61,11 +96,11 @@ func TestCleanupRegex(t *testing.T) {
 
 func TestCaskApps(t *testing.T) {
 	var arts []json.RawMessage
-	raw := `[{"app":["Foo.app"]},{"app":["Sub/Bar.app",{"target":"Baz.app"}]},{"zap":[{"trash":"~/x"}]},{"binary":["x"]}]`
+	raw := `[{"app":["Foo.app"]},{"app":["Sub/Bar.app",{"target":"Baz.app"}]},{"zap":[{"trash":"~/x"}]},{"binary":["x"]},{"uninstall":[{"pkgutil":"x","delete":["/Applications/Pkg.app","/Library/Other/thing"]}]}]`
 	if err := json.Unmarshal([]byte(raw), &arts); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := caskApps(arts), []string{"Foo.app", "Baz.app"}; !reflect.DeepEqual(got, want) {
+	if got, want := caskApps(arts), []string{"Foo.app", "Baz.app", "Pkg.app"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("caskApps = %v, want %v", got, want)
 	}
 }

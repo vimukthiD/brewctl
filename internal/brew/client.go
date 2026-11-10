@@ -23,6 +23,8 @@ type Client struct {
 	Caskroom string `json:"caskroom"`
 	Cache    string `json:"cache"`
 	Version  string `json:"version"`
+	// IconPath is an .icns shown in the password dialog; empty for a generic one.
+	IconPath string `json:"-"`
 }
 
 // ErrNotFound is returned when no brew executable can be located.

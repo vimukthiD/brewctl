@@ -22,8 +22,10 @@ doubles as a cheat sheet.
 - **Cleanup**: unused dependencies, old versions, the download cache.
 - **Activity**: live output of every command the app runs.
 
-Anything that needs an admin password (some apps installed as casks) is not
-handled yet: the job fails fast and shows the command to run in Terminal.
+Some apps need an admin password to install, upgrade or remove. When Homebrew
+asks for it, Brewctl shows the standard macOS password dialog. The password
+goes from that dialog straight to `sudo`; the app never sees, logs or stores
+it. Cancel the dialog and the job stops with nothing changed.
 
 ## Requirements
 

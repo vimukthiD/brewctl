@@ -47,7 +47,7 @@ export function RemoteDrawer() {
   const isBusy = busy.has(key);
   const activeJob = jobFor(key);
   const missing = info ? info.deps.filter((d) => !byShort.has(d)) : [];
-  const blocked = info?.disabled || info?.needsAdmin;
+  const blocked = info?.disabled;
 
   return (
     <aside className="drawer" aria-label={`${ref.name} details`}>
@@ -115,9 +115,8 @@ export function RemoteDrawer() {
               <div className="callout callout-box">
                 <KeyRound size={16} />
                 <div>
-                  <strong>Needs your admin password</strong>
-                  <p>This app uses a system installer. Brewctl can't ask for your password yet, so install it from Terminal:</p>
-                  <CommandHint command={`brew install ${flag}${info.name}`} />
+                  <strong>Asks for your Mac password</strong>
+                  <p>This app uses a system installer, so macOS will ask for your login password partway through.</p>
                 </div>
               </div>
             )}
@@ -156,12 +155,8 @@ export function RemoteDrawer() {
               </>
             )}
 
-            {!info.needsAdmin && (
-              <>
-                <h3 className="sub">In Terminal</h3>
-                <CommandHint command={`brew install ${flag}${info.name}`} />
-              </>
-            )}
+            <h3 className="sub">In Terminal</h3>
+            <CommandHint command={`brew install ${flag}${info.name}`} />
           </>
         )}
       </div>

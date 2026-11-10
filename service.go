@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -37,6 +39,19 @@ type PkgRef struct {
 	Kind string `json:"kind"`
 }
 
+// bundleIcon finds the app icon inside the .app bundle, if running from one.
+func bundleIcon() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	icon := filepath.Join(filepath.Dir(filepath.Dir(exe)), "Resources", "icons.icns")
+	if _, err := os.Stat(icon); err != nil {
+		return ""
+	}
+	return icon
+}
+
 func emit(event string, data any) {
 	if app := application.Get(); app != nil {
 		app.Event.Emit(event, data)
@@ -55,6 +70,7 @@ func (s *BrewService) ready(ctx context.Context) (*brew.Client, *brew.Runner, er
 	if err != nil {
 		return nil, nil, err
 	}
+	c.IconPath = bundleIcon()
 	s.client = c
 	s.runner = brew.NewRunner(c, emit)
 	return s.client, s.runner, nil

@@ -222,9 +222,13 @@ export function BrewProvider({ children }: { children: ReactNode }) {
       } else if (raw.status === "failed") {
         toast({
           tone: "error",
-          text: raw.needsSudo
-            ? `${raw.title} needs your admin password`
-            : `${raw.title} failed`,
+          text: !raw.needsSudo
+            ? `${raw.title} failed`
+            : raw.sudoIssue === "cancelled"
+              ? `${raw.title} — password prompt cancelled`
+              : raw.sudoIssue === "wrong"
+                ? `${raw.title} — password not accepted`
+                : `${raw.title} needs your admin password`,
           jobId: raw.id,
         });
       }

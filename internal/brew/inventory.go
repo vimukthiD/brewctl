@@ -247,6 +247,25 @@ func caskApps(artifacts []json.RawMessage) []string {
 		if json.Unmarshal(raw, &m) != nil {
 			continue
 		}
+		// Apps installed by a system installer (.pkg) aren't listed as "app"
+		// artifacts; the cask names them in its uninstall "delete" list instead.
+		if un, ok := m["uninstall"]; ok {
+			var stanzas []map[string]json.RawMessage
+			if json.Unmarshal(un, &stanzas) == nil {
+				for _, st := range stanzas {
+					var many []string
+					var one string
+					if json.Unmarshal(st["delete"], &many) != nil && json.Unmarshal(st["delete"], &one) == nil {
+						many = []string{one}
+					}
+					for _, d := range many {
+						if filepath.Dir(d) == "/Applications" && strings.HasSuffix(d, ".app") {
+							apps = append(apps, filepath.Base(d))
+						}
+					}
+				}
+			}
+		}
 		entry, ok := m["app"]
 		if !ok {
 			continue

@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { CheckCircle2, CircleSlash, Clock, KeyRound, TerminalSquare, XCircle } from "lucide-react";
 import { Button, CommandHint, Empty, Spinner } from "../components";
-import { duration, isActive, timeAgo, type Job } from "../lib/api";
+import { duration, isActive, sudoMessage, timeAgo, type Job } from "../lib/api";
 import { useBrew } from "../state";
 
 function StatusIcon({ j }: { j: Job }) {
@@ -115,12 +115,12 @@ export function Activity() {
               </div>
               {open && (
                 <div className="job-body">
-                  {j.needsSudo && (
+                  {j.needsSudo && j.status === "failed" && (
                     <div className="callout">
                       <KeyRound size={16} />
                       <div>
-                        <strong>This one needs your admin password.</strong>
-                        <p>Brewctl can't ask for it yet. Run the same command in Terminal:</p>
+                        <strong>{sudoMessage(j).title}</strong>
+                        <p>{sudoMessage(j).body}</p>
                         <CommandHint command={j.command} />
                       </div>
                     </div>
