@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowUpCircle, Beer, Compass, LayoutDashboard, Package, RefreshCw, Search, Sparkles, TerminalSquare, X } from "lucide-react";
+import { ArrowUpCircle, Beer, Compass, LayoutDashboard, Server, Package, RefreshCw, Search, Sparkles, TerminalSquare, X } from "lucide-react";
 import { Button, CommandHint, ConfirmDialog, Spinner, Toasts } from "./components";
 import { Drawer } from "./Drawer";
 import { UninstallDialog } from "./UninstallDialog";
@@ -8,6 +8,7 @@ import { useBrew, type View } from "./state";
 import { Activity } from "./views/Activity";
 import { Cleanup } from "./views/Cleanup";
 import { Discover } from "./views/Discover";
+import { Services } from "./views/Services";
 import { RemoteDrawer } from "./RemoteDrawer";
 import { Installed } from "./views/Installed";
 import { Overview } from "./views/Overview";
@@ -18,6 +19,7 @@ const NAV: { id: View; label: string; icon: typeof Package }[] = [
   { id: "installed", label: "Installed", icon: Package },
   { id: "discover", label: "Discover", icon: Compass },
   { id: "updates", label: "Updates", icon: ArrowUpCircle },
+  { id: "services", label: "Services", icon: Server },
   { id: "cleanup", label: "Cleanup", icon: Sparkles },
   { id: "activity", label: "Activity", icon: TerminalSquare },
 ];
@@ -27,6 +29,7 @@ const TITLES: Record<View, string> = {
   installed: "Installed",
   discover: "Discover",
   updates: "Updates",
+  services: "Services",
   cleanup: "Cleanup",
   activity: "Activity",
 };
@@ -58,7 +61,7 @@ export default function App() {
       } else if (k === "r") {
         e.preventDefault();
         b.refresh();
-      } else if (k >= "1" && k <= "6") {
+      } else if (k >= "1" && k <= "7") {
         e.preventDefault();
         b.setView(NAV[Number(k) - 1].id);
       }
@@ -68,6 +71,7 @@ export default function App() {
   }, [b]);
 
   const nUpdates = b.pkgs.filter((p) => p.outdated && !p.pinned).length;
+  const nRunning = (b.services ?? []).filter((s) => s.running).length;
   const active = b.jobs.filter(isActive);
   const running = b.jobs.find((j) => j.status === "running");
   const lastLine = running?.output[running.output.length - 1];
@@ -75,6 +79,7 @@ export default function App() {
   const badge = (id: View) => {
     if (id === "installed" && b.pkgs.length) return <span className="nav-n">{b.pkgs.length}</span>;
     if (id === "updates" && nUpdates) return <span className="nav-n is-accent">{nUpdates}</span>;
+    if (id === "services" && nRunning) return <span className="nav-n is-live">{nRunning}</span>;
     if (id === "activity" && active.length) return <Spinner size={13} />;
     return null;
   };
@@ -213,6 +218,14 @@ export default function App() {
               {b.view === "installed" && <Installed query={installedQuery} />}
               {b.view === "discover" && <Discover query={discoverQuery} setQuery={setDiscoverQuery} focusSearch={() => searchRef.current?.focus()} />}
               {b.view === "updates" && <Updates />}
+              {b.view === "services" && (
+                <Services
+                  onDiscover={(q) => {
+                    setDiscoverQuery(q);
+                    b.setView("discover");
+                  }}
+                />
+              )}
               {b.view === "cleanup" && <Cleanup />}
               {b.view === "activity" && <Activity />}
             </>

@@ -6,7 +6,8 @@ import { useBrew } from "./state";
 
 /** Confirms an uninstall and offers to clear what `brew uninstall` leaves behind. */
 export function UninstallDialog({ p }: { p: Pkg }) {
-  const { requestUninstall, uninstall } = useBrew();
+  const { requestUninstall, uninstall, services } = useBrew();
+  const service = p.kind === "formula" ? (services ?? []).find((s) => s.name === p.short && (s.running || s.registered)) : undefined;
   const [found, setFound] = useState<Leftover[] | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -77,7 +78,12 @@ export function UninstallDialog({ p }: { p: Pkg }) {
               ? `Removes ${p.short} from your Mac. Its dependencies stay until you clear unused ones from Cleanup.`
               : `Removes ${p.short} from your Mac.`}
         </div>
-        <CommandHint command={`brew uninstall ${flag}${p.name}`} />
+        {service && (
+          <div className="dialog-body">
+            Its background service is {service.running ? "running" : "set to start at login"}, so Brewctl stops it first. Homebrew would otherwise leave it running.
+          </div>
+        )}
+        <CommandHint command={`${service ? `brew services stop ${p.short} && ` : ""}brew uninstall ${flag}${p.name}`} />
 
         <div className="leftovers">
           {found === null ? (

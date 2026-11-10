@@ -2266,3 +2266,193 @@ button.rank-row:hover {
     width: 100%;
   }
 }
+
+/* ---------- services ---------- */
+
+.svcs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.svc {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.svc.is-open {
+  box-shadow: var(--shadow);
+}
+
+.svc-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-right: 12px;
+}
+
+.svc-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 6px 11px 16px;
+}
+
+.svc-toggle:hover .name {
+  text-decoration: underline;
+}
+
+.svc-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.svc-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.svc-chev {
+  color: var(--text-3);
+  transition: transform 0.15s;
+  flex: none;
+}
+
+.svc.is-open .svc-chev {
+  transform: rotate(180deg);
+}
+
+.svc-actions {
+  display: flex;
+  gap: 6px;
+  flex: none;
+}
+
+.svc-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--text-3);
+  opacity: 0.55;
+  flex: none;
+}
+
+.svc-dot.is-running {
+  background: var(--green);
+  opacity: 1;
+  box-shadow: 0 0 0 3px var(--green-soft);
+}
+
+.svc-dot.is-error {
+  background: var(--red);
+  opacity: 1;
+  box-shadow: 0 0 0 3px var(--red-soft);
+}
+
+.svc-dot.is-scheduled {
+  background: var(--blue);
+  opacity: 1;
+}
+
+.svc-body {
+  padding: 4px 16px 16px 37px;
+  border-top: 1px solid var(--border);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.svc-desc {
+  margin-top: 12px;
+  color: var(--text-2);
+}
+
+.more-inline {
+  margin: 0 0 0 4px;
+}
+
+.svc-alt {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 10px;
+  font-size: 12px;
+}
+
+.svc-alt .more {
+  margin-top: 0;
+  white-space: nowrap;
+}
+
+.svc-facts {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.svc-facts > div {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+}
+
+.svc-facts dt {
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.svc-facts dd {
+  overflow-wrap: anywhere;
+}
+
+.mono {
+  font: 11.5px/1.5 var(--mono);
+}
+
+.svc-log {
+  max-height: 220px;
+  border-radius: 8px;
+}
+
+.svc .progress {
+  border-top: 1px solid var(--border);
+}
+
+.nav-n.is-live {
+  background: var(--green-soft);
+  color: var(--green);
+  font-weight: 650;
+}
+
+/* Service status line inside the package details panel. */
+.svc-link {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 9px 12px;
+  margin-bottom: 8px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+}
+
+.svc-link:hover {
+  background: var(--hover);
+}
+
+.svc-link > span:nth-child(2) {
+  flex: 1;
+}
+
+.svc-go {
+  color: var(--accent-text);
+  font-size: 12px;
+  font-weight: 550;
+}

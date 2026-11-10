@@ -22,7 +22,7 @@ function DepChips({ names, empty }: { names: string[]; empty: string }) {
 }
 
 export function Drawer() {
-  const { selected: p, select, sizes, usedBy, upgrade, setPinned, busy, jobFor, confirming, uninstallTarget, requestUninstall } = useBrew();
+  const { selected: p, select, sizes, usedBy, upgrade, setPinned, busy, jobFor, confirming, uninstallTarget, requestUninstall, services, setView } = useBrew();
   const [showAll, setShowAll] = useState(false);
 
   useEffect(() => setShowAll(false), [p?.key]);
@@ -40,6 +40,7 @@ export function Drawer() {
 
   const dependents = p.kind === "formula" ? usedBy.get(p.short) ?? [] : [];
   const indirect = p.allDeps.filter((d) => !p.deps.includes(d));
+  const service = p.kind === "formula" ? (services ?? []).find((s) => s.name === p.short) : undefined;
   const isBusy = busy.has(p.key);
   const activeJob = jobFor(p.key);
   const flag = p.kind === "cask" ? "--cask " : "";
@@ -108,6 +109,14 @@ export function Drawer() {
                 ? "Installed automatically, because other packages need it."
                 : "Installed automatically, and nothing needs it any more."}
         </div>
+
+        {service && (
+          <button type="button" className="svc-link" onClick={() => setView("services")}>
+            <span className={`svc-dot ${service.running ? "is-running" : service.status === "error" ? "is-error" : ""}`} aria-hidden />
+            <span>Background service: {service.running ? "running" : service.status === "error" ? "stopped with an error" : "not running"}</span>
+            <span className="svc-go">Manage</span>
+          </button>
+        )}
 
         {p.outdated && p.pinned && <p className="note">Pinned at {p.version}. Unpin it to upgrade to {p.latest}.</p>}
         {p.kind === "cask" && p.autoUpdates && <p className="note">This app updates itself, so Homebrew doesn't upgrade it.</p>}

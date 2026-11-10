@@ -229,3 +229,35 @@ plain-cask: Just a description
 		t.Errorf("rank: %s, %s", rs[0].Name, rs[1].Name)
 	}
 }
+
+func TestParseServices(t *testing.T) {
+	raw := `[
+	 {"name":"zeta","service_name":"sh.brew.zeta","running":false,"loaded":false,"schedulable":false,"pid":null,"exit_code":null,"user":null,"status":"none","file":"/opt/homebrew/opt/zeta/sh.brew.zeta.plist","registered":false,"command":"/opt/homebrew/opt/zeta/bin/zeta","log_path":null,"error_log_path":null},
+	 {"name":"alpha","service_name":"sh.brew.alpha","running":true,"loaded":true,"schedulable":false,"pid":4242,"exit_code":null,"user":"me","status":"started","file":"/Users/me/Library/LaunchAgents/sh.brew.alpha.plist","registered":true,"command":"alpha -d","log_path":"/opt/homebrew/var/log/alpha.log","error_log_path":null},
+	 {"name":"broken","service_name":"sh.brew.broken","running":false,"loaded":true,"schedulable":false,"pid":null,"exit_code":78,"user":"me","status":"error","file":"x","registered":true,"command":null,"log_path":null,"error_log_path":null}
+	]`
+	ss, err := parseServices([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ss) != 3 || ss[0].Name != "alpha" || !ss[0].Running || ss[0].Pid != 4242 || ss[0].User != "me" || ss[0].LogPath == "" {
+		t.Fatalf("running service should sort first: %+v", ss)
+	}
+	if ss[1].Name != "broken" || ss[1].ExitCode == nil || *ss[1].ExitCode != 78 || ss[1].Command != "" {
+		t.Errorf("error service: %+v", ss[1])
+	}
+	if ss[2].Name != "zeta" || ss[2].Registered || ss[2].ExitCode != nil {
+		t.Errorf("stopped service: %+v", ss[2])
+	}
+}
+
+func TestTailFile(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "log")
+	os.WriteFile(p, []byte("first line is long\nsecond\nthird\n"), 0o644)
+	if got, _ := tailFile(p, 1024); got != "first line is long\nsecond\nthird" {
+		t.Errorf("whole file: %q", got)
+	}
+	if got, _ := tailFile(p, 16); got != "second\nthird" {
+		t.Errorf("tail drops the partial line: %q", got)
+	}
+}

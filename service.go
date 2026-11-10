@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -217,6 +218,21 @@ func (s *BrewService) Uninstall(ctx context.Context, p PkgRef) (brew.Job, error)
 		return brew.Job{}, err
 	}
 	flag, _ := kindFlag(p.Kind)
+	// `brew uninstall` leaves a formula's service running and registered at
+	// login, pointing at files that no longer exist. Stop it first; jobs run
+	// in order, so the uninstall follows.
+	if p.Kind == "formula" {
+		if c, _, err := s.ready(ctx); err == nil {
+			if services, err := c.Services(ctx); err == nil {
+				short := p.Name[strings.LastIndex(p.Name, "/")+1:]
+				for _, sv := range services {
+					if sv.Name == short && sv.Active() && sv.User != "root" {
+						r.Enqueue("Stop "+short, true, "services", "stop", short)
+					}
+				}
+			}
+		}
+	}
 	return r.Enqueue("Uninstall "+p.Name, true, "uninstall", flag, p.Name), nil
 }
 
@@ -355,4 +371,38 @@ func (s *BrewService) Install(ctx context.Context, p PkgRef) (brew.Job, error) {
 	}
 	flag, _ := kindFlag(p.Kind)
 	return r.Enqueue("Install "+p.Name, true, "install", flag, p.Name), nil
+}
+
+// Services lists background services provided by installed formulae.
+func (s *BrewService) Services(ctx context.Context) ([]brew.Service, error) {
+	c, _, err := s.ready(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return c.Services(ctx)
+}
+
+// ServiceAction starts, stops, restarts, runs or pauses a service.
+func (s *BrewService) ServiceAction(ctx context.Context, name, action string) (brew.Job, error) {
+	_, r, err := s.ready(ctx)
+	if err != nil {
+		return brew.Job{}, err
+	}
+	if !brew.ValidName(name) {
+		return brew.Job{}, fmt.Errorf("invalid service name %q", name)
+	}
+	verb, ok := brew.ServiceActions[action]
+	if !ok {
+		return brew.Job{}, fmt.Errorf("unknown service action %q", action)
+	}
+	return r.Enqueue(verb+" "+name, true, "services", action, name), nil
+}
+
+// ServiceLog returns the tail of a service's log files, if it has any.
+func (s *BrewService) ServiceLog(ctx context.Context, name string) (string, error) {
+	c, _, err := s.ready(ctx)
+	if err != nil {
+		return "", err
+	}
+	return c.ServiceLog(ctx, name)
 }

@@ -19,6 +19,10 @@ doubles as a cheat sheet.
 - **Discover**: search every tool and app in Homebrew by name or description,
   see what else it would install, and install it.
 - **Updates**: check for updates, upgrade one or all.
+- **Services**: background services Homebrew runs (databases, daemons): see
+  which are running, start, stop or restart them, and read their logs.
+  Uninstalling a package stops its service first, which `brew uninstall`
+  alone doesn't do.
 - **Cleanup**: unused dependencies, old versions, the download cache.
 - **Activity**: live output of every command the app runs.
 
@@ -62,7 +66,7 @@ needs a Developer ID signature and notarization (`wails3 setup`, then
 |---|---|
 | `internal/brew/` | Finds brew, reads the inventory, measures disk usage, runs jobs one at a time |
 | `service.go` | The API the UI calls |
-| `frontend/src/` | React UI: `state.tsx` holds the data, `views/` the five screens |
+| `frontend/src/` | React UI: `state.tsx` holds the data, `views/` the screens |
 | `build/` | Icons, Info.plist and packaging tasks |
 | `tools/icon/` | Draws `build/appicon.png` (`go run ./tools/icon build/appicon.png`) |
 

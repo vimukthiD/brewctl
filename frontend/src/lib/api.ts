@@ -6,12 +6,15 @@ import type {
   CleanupPreview as RawCleanup,
   Leftover,
   SearchResult,
+  Service,
   Remote as RawRemote,
 } from "../../bindings/dev.vimukthid/brewctl/internal/brew/models";
 import type { Status } from "../../bindings/dev.vimukthid/brewctl/models";
 
 export { Brew };
-export type { Status, Leftover, SearchResult };
+export type { Status, Leftover, SearchResult, Service };
+
+export type ServiceVerb = "start" | "run" | "stop" | "restart";
 
 export interface Remote extends Omit<RawRemote, "deps" | "kind"> {
   kind: Kind;

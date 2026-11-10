@@ -23,10 +23,12 @@ import {
   type Job,
   type Pkg,
   type Ref,
+  type Service,
+  type ServiceVerb,
   type Status,
 } from "./lib/api";
 
-export type View = "overview" | "installed" | "discover" | "updates" | "cleanup" | "activity";
+export type View = "overview" | "installed" | "discover" | "updates" | "services" | "cleanup" | "activity";
 
 export interface ConfirmOptions {
   title: string;
@@ -51,6 +53,9 @@ interface Ctx {
   sizes: Record<string, number> | null;
   cacheSize: number | null;
   cleanup: CleanupPreview | null;
+  /** Background services; null until first loaded. */
+  services: Service[] | null;
+  serviceAction: (name: string, action: ServiceVerb) => Promise<void>;
   jobs: Job[];
   loading: boolean;
   refreshing: boolean;
@@ -107,6 +112,7 @@ export function BrewProvider({ children }: { children: ReactNode }) {
   const [sizes, setSizes] = useState<Record<string, number> | null>(null);
   const [cacheSize, setCacheSize] = useState<number | null>(null);
   const [cleanup, setCleanup] = useState<CleanupPreview | null>(null);
+  const [services, setServices] = useState<Service[] | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -159,13 +165,17 @@ export function BrewProvider({ children }: { children: ReactNode }) {
       setLoading(false);
       setRefreshing(false);
       // Slower, secondary data: fill in when ready.
-      const [sz, cl] = await Promise.allSettled([Brew.Sizes(), Brew.CleanupPreview()]);
-      if (seq !== refreshSeq.current) return;
-      if (sz.status === "fulfilled" && sz.value) {
-        setSizes((sz.value.packages ?? {}) as Record<string, number>);
-        setCacheSize(sz.value.cache);
-      }
-      if (cl.status === "fulfilled") setCleanup(toCleanup(cl.value));
+      // Each lands on its own, so a slow one doesn't hold up the others.
+      const current = () => seq === refreshSeq.current;
+      await Promise.allSettled([
+        Brew.Sizes().then((sz) => {
+          if (!current() || !sz) return;
+          setSizes((sz.packages ?? {}) as Record<string, number>);
+          setCacheSize(sz.cache);
+        }),
+        Brew.CleanupPreview().then((cl) => current() && setCleanup(toCleanup(cl))),
+        Brew.Services().then((sv) => current() && setServices(sv ?? [])),
+      ]);
     } catch (e) {
       if (seq === refreshSeq.current) setError(errorMessage(e));
     } finally {
@@ -199,11 +209,23 @@ export function BrewProvider({ children }: { children: ReactNode }) {
       const finished = !isActive({ ...raw, output: [] });
       if (!finished || !wasActive) return;
 
-      setBusyByJob((b) => {
-        if (!(raw.id in b)) return b;
-        const { [raw.id]: _, ...rest } = b;
-        return rest;
-      });
+      const release = () =>
+        setBusyByJob((b) => {
+          if (!(raw.id in b)) return b;
+          const { [raw.id]: _, ...rest } = b;
+          return rest;
+        });
+      // A service job only changes service state: reload just that, and keep
+      // the row busy until the new state is on screen.
+      const serviceJob = raw.command.startsWith("brew services ");
+      if (serviceJob) {
+        Brew.Services()
+          .then((sv) => setServices(sv ?? []))
+          .catch(() => {})
+          .finally(release);
+      } else {
+        release();
+      }
       const pending = pendingLeftovers.current[raw.id];
       delete pendingLeftovers.current[raw.id];
       if (pending && raw.status === "done") {
@@ -232,7 +254,7 @@ export function BrewProvider({ children }: { children: ReactNode }) {
           jobId: raw.id,
         });
       }
-      if (raw.mutates) {
+      if (raw.mutates && !serviceJob) {
         window.clearTimeout(refreshTimer);
         refreshTimer = window.setTimeout(() => {
           const others = jobsRef.current.some((j) => j.id !== raw.id && j.mutates && isActive(j));
@@ -327,6 +349,15 @@ export function BrewProvider({ children }: { children: ReactNode }) {
     [guard, track],
   );
 
+  const serviceAction = useCallback(
+    (name: string, action: ServiceVerb) =>
+      guard(async () => {
+        const job = await Brew.ServiceAction(name, action);
+        track(job, [`service:${name}`]);
+      }),
+    [guard, track],
+  );
+
   const upgrade = useCallback(
     (list: Pkg[]) =>
       guard(async () => {
@@ -390,6 +421,8 @@ export function BrewProvider({ children }: { children: ReactNode }) {
     sizes,
     cacheSize,
     cleanup,
+    services,
+    serviceAction,
     jobs,
     loading,
     refreshing,
