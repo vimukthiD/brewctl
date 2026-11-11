@@ -2548,6 +2548,13 @@ button.rank-row:hover {
   background: var(--sunken);
 }
 
+.monitor-note {
+  margin: -6px 2px 14px;
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .switch {
   display: inline-flex;
   align-items: center;

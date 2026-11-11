@@ -24,7 +24,10 @@ doubles as a cheat sheet.
   [OSV.dev](https://osv.dev) vulnerability database (`brew vulns`), shows which
   have known vulnerabilities and whether a fix exists, and says plainly what
   couldn't be checked. Turn on "Check daily" to have Brewctl re-check once a
-  day while it's open and notify you about new ones. A check sends the names
+  day, even while it's closed, and notify you about new ones. It does this
+  with a small login agent (`~/Library/LaunchAgents/dev.vimukthid.brewctl.monitor.plist`)
+  that runs Brewctl in the background without a window; turning "Check
+  daily" off removes it. A check sends the names
   and versions of your tools to OSV.dev, so none runs until you ask.
 - **Services**: background services Homebrew runs (databases, daemons): see
   which are running, start, stop or restart them, and read their logs.

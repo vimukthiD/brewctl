@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/services/notifications"
 
 	"dev.vimukthid/brewctl/internal/brew"
 )
@@ -27,22 +27,14 @@ type BrewService struct {
 
 	security    *brew.SecurityStore
 	scanning    bool
-	scanError   string
 	monitorOnce sync.Once
-}
+	background  bool   // running as the login agent's check, not the app
+	agentErr    string // why setting up the login agent failed
 
-// SecurityState is what the Security screen shows.
-type SecurityState struct {
-	Report   *brew.VulnReport `json:"report"` // nil until the first check
-	Monitor  bool             `json:"monitor"`
-	Scanning bool             `json:"scanning"`
-	Error    string           `json:"error"`
+	notes       *notifications.NotificationService // nil when unavailable
+	notesOn     string                             // "allowed", "off" or "unavailable"
+	pendingView string                             // a view a clicked notification asked for
 }
-
-const (
-	monitorEvery = 24 * time.Hour
-	monitorTick  = 15 * time.Minute
-)
 
 // Status describes the Homebrew installation the app is driving.
 type Status struct {
@@ -93,7 +85,9 @@ func (s *BrewService) ready(ctx context.Context) (*brew.Client, *brew.Runner, er
 	c.IconPath = bundleIcon()
 	s.client = c
 	s.runner = brew.NewRunner(c, emit)
-	s.monitorOnce.Do(func() { go s.monitor() })
+	if !s.background {
+		s.monitorOnce.Do(func() { go s.monitor() })
+	}
 	return s.client, s.runner, nil
 }
 
@@ -516,113 +510,4 @@ func (s *BrewService) ServiceLog(ctx context.Context, name string) (string, erro
 		return "", err
 	}
 	return c.ServiceLog(ctx, name)
-}
-
-func (s *BrewService) store() *brew.SecurityStore {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.security == nil {
-		dir, err := os.UserConfigDir()
-		if err != nil {
-			dir = os.TempDir()
-		}
-		s.security = brew.OpenSecurityStore(filepath.Join(dir, "dev.vimukthid.brewctl", "security.json"))
-	}
-	return s.security
-}
-
-func (s *BrewService) securityState() SecurityState {
-	st := s.store()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return SecurityState{Report: st.Report(), Monitor: st.Monitor(), Scanning: s.scanning, Error: s.scanError}
-}
-
-// Security returns the last vulnerability check without running a new one.
-func (s *BrewService) Security(ctx context.Context) SecurityState {
-	return s.securityState()
-}
-
-// SecurityScan checks installed tools against the OSV.dev database now.
-func (s *BrewService) SecurityScan(ctx context.Context) SecurityState {
-	s.scan(false)
-	return s.securityState()
-}
-
-// SetSecurityMonitor turns the daily background check on or off. Turning it
-// on checks right away if the last check is stale.
-func (s *BrewService) SetSecurityMonitor(ctx context.Context, on bool) SecurityState {
-	st := s.store()
-	st.SetMonitor(on)
-	if on && time.Since(time.Unix(st.CheckedAt(), 0)) > monitorEvery {
-		go s.scan(false)
-	}
-	return s.securityState()
-}
-
-// SecurityAcknowledge clears the "new" marks once the user has seen them.
-func (s *BrewService) SecurityAcknowledge(ctx context.Context) SecurityState {
-	s.store().Acknowledge()
-	return s.securityState()
-}
-
-// scan runs one check; a second call while one is running does nothing.
-// Background scans notify about anything new.
-func (s *BrewService) scan(background bool) {
-	st := s.store()
-	s.mu.Lock()
-	if s.scanning {
-		s.mu.Unlock()
-		return
-	}
-	s.scanning = true
-	s.mu.Unlock()
-	emit("security:update", s.securityState())
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-	var fresh []brew.Finding
-	c, _, err := s.ready(ctx)
-	if err == nil {
-		var rep *brew.VulnReport
-		if rep, err = c.Vulns(ctx); err == nil {
-			fresh = st.Record(rep)
-		}
-	}
-
-	s.mu.Lock()
-	s.scanning = false
-	s.scanError = ""
-	if err != nil {
-		s.scanError = err.Error()
-	}
-	s.mu.Unlock()
-	emit("security:update", s.securityState())
-
-	if background && len(fresh) > 0 {
-		n := 0
-		names := make([]string, 0, len(fresh))
-		for _, f := range fresh {
-			n += len(f.Vulns)
-			names = append(names, f.Formula)
-		}
-		title := "1 new vulnerability in your Homebrew tools"
-		if n > 1 {
-			title = fmt.Sprintf("%d new vulnerabilities in your Homebrew tools", n)
-		}
-		brew.Notify(ctx, title, "Affects "+strings.Join(names, ", ")+". Open Brewctl to review.")
-	}
-}
-
-// monitor re-checks once a day while the app is open, if the user turned
-// monitoring on.
-func (s *BrewService) monitor() {
-	time.Sleep(20 * time.Second)
-	for {
-		st := s.store()
-		if st.Monitor() && time.Since(time.Unix(st.CheckedAt(), 0)) > monitorEvery {
-			s.scan(true)
-		}
-		time.Sleep(monitorTick)
-	}
 }

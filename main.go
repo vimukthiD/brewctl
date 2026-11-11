@@ -3,6 +3,7 @@ package main
 import (
 	"embed"
 	"log"
+	"os"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -11,6 +12,10 @@ import (
 var assets embed.FS
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == agentFlag {
+		runBackgroundCheck()
+		return
+	}
 	app := application.New(application.Options{
 		Name:        "Brewctl",
 		Description: "A control center for Homebrew",

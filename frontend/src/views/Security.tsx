@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ChevronDown, ExternalLink, ShieldAlert, ShieldCheck } from "lucide-react";
 import { Button, CommandHint, Empty, Tag } from "../components";
-import { openURL, plural, timeAgo, type Finding, type Vuln } from "../lib/api";
+import { Brew, openURL, plural, timeAgo, type Finding, type Vuln } from "../lib/api";
 import { useBrew } from "../state";
 
 const SEVERITY: Record<string, { label: string; tone: "red" | "accent" | "neutral" }> = {
@@ -109,11 +109,37 @@ function Row({ f }: { f: Finding }) {
   );
 }
 
+/** How the daily check runs, and whether it can notify. Shown while it's on. */
+function MonitorNote() {
+  const { security } = useBrew();
+  if (!security?.monitor) return null;
+  const where =
+    security.background === "on"
+      ? "Checks once a day, even when Brewctl is closed."
+      : security.background === "error"
+        ? `Checks once a day while Brewctl is open. Checking while it's closed couldn't be set up${security.backgroundError ? `: ${security.backgroundError}` : "."}`
+        : "Checks once a day while Brewctl is open.";
+  return (
+    <p className="monitor-note">
+      {where}
+      {security.notifications === "off" && (
+        <>
+          {" "}
+          Notifications are off for Brewctl, so new vulnerabilities only show up here.{" "}
+          <button type="button" className="more more-inline" onClick={() => void Brew.OpenNotificationSettings()}>
+            Turn on in System Settings
+          </button>
+        </>
+      )}
+    </p>
+  );
+}
+
 function MonitorSwitch() {
   const { security, setSecurityMonitor } = useBrew();
   const on = !!security?.monitor;
   return (
-    <button type="button" role="switch" aria-checked={on} className={`switch ${on ? "is-on" : ""}`} title="Checks once a day while Brewctl is open, and notifies you about new vulnerabilities" onClick={() => setSecurityMonitor(!on)}>
+    <button type="button" role="switch" aria-checked={on} className={`switch ${on ? "is-on" : ""}`} title="Checks once a day, even when Brewctl is closed, and notifies you about new vulnerabilities" onClick={() => setSecurityMonitor(!on)}>
       <span className="switch-track" aria-hidden>
         <span className="switch-knob" />
       </span>
@@ -151,6 +177,7 @@ export function Security() {
           <div className="empty-actions">
             <MonitorSwitch />
           </div>
+          <MonitorNote />
         </Empty>
       </div>
     );
@@ -181,6 +208,7 @@ export function Security() {
           Check now
         </Button>
       </div>
+      <MonitorNote />
 
       {error && (
         <div className="banner" role="alert">

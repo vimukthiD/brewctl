@@ -208,6 +208,19 @@ export function BrewProvider({ children }: { children: ReactNode }) {
     Brew.Security()
       .then((s) => setSecurity(s))
       .catch(() => {});
+    // A clicked notification opens a view, whether it launched the app or
+    // arrived while it was open.
+    const go = (v: unknown) => {
+      if (v === "security") {
+        setSelectedKey(null);
+        setRemote(null);
+        setView("security");
+      }
+    };
+    Brew.PendingView()
+      .then(go)
+      .catch(() => {});
+    const offNavigate = Events.On("app:navigate", (ev: { data: unknown }) => go(Array.isArray(ev.data) ? ev.data[0] : ev.data));
     const offSecurity = Events.On("security:update", (ev: { data: unknown }) => {
       const s = (Array.isArray(ev.data) ? ev.data[0] : ev.data) as SecurityState;
       if (s && typeof s.scanning === "boolean") setSecurity(s);
@@ -304,6 +317,7 @@ export function BrewProvider({ children }: { children: ReactNode }) {
       offUpdate();
       offOutput();
       offSecurity();
+      offNavigate();
     };
   }, [refresh, toast]);
 

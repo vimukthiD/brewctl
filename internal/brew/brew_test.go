@@ -443,3 +443,35 @@ func TestApplyLaunchd(t *testing.T) {
 		t.Errorf("stopped: %+v", sv)
 	}
 }
+
+func TestSecurityStoreShared(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "security.json")
+	app, agent := OpenSecurityStore(path), OpenSecurityStore(path)
+	app.SetMonitor(true)
+	if !agent.Monitor() {
+		t.Fatal("agent didn't see the app's setting")
+	}
+	time.Sleep(10 * time.Millisecond) // a distinct modification time
+	agent.Record(&VulnReport{CheckedAt: 1234})
+	if app.CheckedAt() != 1234 {
+		t.Error("app didn't see the agent's check")
+	}
+	agent.SetError("offline")
+	if app.LastError() != "offline" {
+		t.Error("app didn't see the agent's error")
+	}
+
+	unlock, ok := app.TryLock()
+	if !ok {
+		t.Fatal("first lock failed")
+	}
+	if _, ok := agent.TryLock(); ok {
+		t.Error("second lock should fail while the first is held")
+	}
+	unlock()
+	if u, ok := agent.TryLock(); !ok {
+		t.Error("lock not released")
+	} else {
+		u()
+	}
+}

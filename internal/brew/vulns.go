@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -151,10 +152,15 @@ func (c *Client) Vulns(ctx context.Context) (*VulnReport, error) {
 
 // SecurityStore keeps the last scan and what the user has already been
 // shown, so the monitor can tell new vulnerabilities from known ones.
+//
+// The app and the background check (a separate process) share the file, so
+// every call re-reads it if it changed on disk.
 type SecurityStore struct {
-	mu   sync.Mutex
-	path string
-	data securityData
+	mu      sync.Mutex
+	path    string
+	data    securityData
+	modTime time.Time
+	size    int64
 }
 
 type securityData struct {
@@ -162,6 +168,8 @@ type securityData struct {
 	Report    *VulnReport      `json:"report"`
 	FirstSeen map[string]int64 `json:"firstSeen"`
 	Unseen    []string         `json:"unseen"`
+	// LastError is why the last check didn't finish; empty when it did.
+	LastError string `json:"lastError,omitempty"`
 }
 
 func vulnKey(formula, id string) string { return formula + "|" + id }
@@ -170,13 +178,65 @@ func vulnKey(formula, id string) string { return formula + "|" + id }
 // starts empty.
 func OpenSecurityStore(path string) *SecurityStore {
 	s := &SecurityStore{path: path}
-	if b, err := os.ReadFile(path); err == nil {
-		_ = json.Unmarshal(b, &s.data)
+	s.load()
+	return s
+}
+
+// load re-reads the file if another process changed it.
+func (s *SecurityStore) load() {
+	if st, err := os.Stat(s.path); err == nil && (!st.ModTime().Equal(s.modTime) || st.Size() != s.size) {
+		if b, err := os.ReadFile(s.path); err == nil {
+			var d securityData
+			if json.Unmarshal(b, &d) == nil {
+				s.data = d
+			}
+		}
+		s.modTime, s.size = st.ModTime(), st.Size()
 	}
 	if s.data.FirstSeen == nil {
 		s.data.FirstSeen = map[string]int64{}
 	}
-	return s
+}
+
+// TryLock takes the check lock, shared with other processes, so the app and
+// the background check never run a check at the same time. It returns false
+// if a check is already running elsewhere.
+func (s *SecurityStore) TryLock() (unlock func(), ok bool) {
+	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
+		return nil, false
+	}
+	f, err := os.OpenFile(s.path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, false
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		f.Close()
+		return nil, false
+	}
+	return func() {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		f.Close()
+	}, true
+}
+
+// SetError records why the last check failed, or clears it.
+func (s *SecurityStore) SetError(msg string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.load()
+	if s.data.LastError == msg {
+		return
+	}
+	s.data.LastError = msg
+	s.save()
+}
+
+// LastError is why the last check didn't finish, if it didn't.
+func (s *SecurityStore) LastError() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.load()
+	return s.data.LastError
 }
 
 func (s *SecurityStore) save() {
@@ -188,8 +248,10 @@ func (s *SecurityStore) save() {
 		return
 	}
 	tmp := s.path + ".tmp"
-	if os.WriteFile(tmp, b, 0o600) == nil {
-		_ = os.Rename(tmp, s.path)
+	if os.WriteFile(tmp, b, 0o600) == nil && os.Rename(tmp, s.path) == nil {
+		if st, err := os.Stat(s.path); err == nil {
+			s.modTime, s.size = st.ModTime(), st.Size()
+		}
 	}
 }
 
@@ -197,6 +259,7 @@ func (s *SecurityStore) save() {
 func (s *SecurityStore) Monitor() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.load()
 	return s.data.Monitor
 }
 
@@ -204,6 +267,7 @@ func (s *SecurityStore) Monitor() bool {
 func (s *SecurityStore) SetMonitor(on bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.load()
 	s.data.Monitor = on
 	s.save()
 }
@@ -212,6 +276,7 @@ func (s *SecurityStore) SetMonitor(on bool) {
 func (s *SecurityStore) CheckedAt() int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.load()
 	if s.data.Report == nil {
 		return 0
 	}
@@ -224,6 +289,7 @@ func (s *SecurityStore) CheckedAt() int64 {
 func (s *SecurityStore) Record(rep *VulnReport) []Finding {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.load()
 	baseline := s.data.Report == nil
 	present := map[string]bool{}
 	var fresh []Finding
@@ -259,6 +325,7 @@ func (s *SecurityStore) Record(rep *VulnReport) []Finding {
 	}
 	s.data.Unseen = kept
 	s.data.Report = rep
+	s.data.LastError = ""
 	s.save()
 	return fresh
 }
@@ -267,6 +334,7 @@ func (s *SecurityStore) Record(rep *VulnReport) []Finding {
 func (s *SecurityStore) Acknowledge() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.load()
 	if len(s.data.Unseen) == 0 {
 		return
 	}
@@ -279,6 +347,7 @@ func (s *SecurityStore) Acknowledge() {
 func (s *SecurityStore) Report() *VulnReport {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.load()
 	if s.data.Report == nil {
 		return nil
 	}
