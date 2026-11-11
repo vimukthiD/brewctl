@@ -78,21 +78,24 @@ type rawInfo struct {
 		} `json:"installed"`
 	} `json:"formulae"`
 	Casks []struct {
-		Token       string            `json:"token"`
-		Names       []string          `json:"name"`
-		Desc        string            `json:"desc"`
-		Homepage    string            `json:"homepage"`
-		Tap         string            `json:"tap"`
-		Version     string            `json:"version"`
-		Installed   string            `json:"installed"`
-		InstalledAt int64             `json:"installed_time"`
-		Outdated    bool              `json:"outdated"`
-		Pinned      bool              `json:"pinned"`
-		AutoUpdates bool              `json:"auto_updates"`
-		Caveats     string            `json:"caveats"`
-		Deprecated  bool              `json:"deprecated"`
-		Disabled    bool              `json:"disabled"`
-		Artifacts   []json.RawMessage `json:"artifacts"`
+		Token       string   `json:"token"`
+		Names       []string `json:"name"`
+		Desc        string   `json:"desc"`
+		Homepage    string   `json:"homepage"`
+		Tap         string   `json:"tap"`
+		Version     string   `json:"version"`
+		Installed   string   `json:"installed"`
+		InstalledAt int64    `json:"installed_time"`
+		Outdated    bool     `json:"outdated"`
+		Pinned      bool     `json:"pinned"`
+		AutoUpdates bool     `json:"auto_updates"`
+		Caveats     string   `json:"caveats"`
+		Deprecated  bool     `json:"deprecated"`
+		Disabled    bool     `json:"disabled"`
+		DependsOn   struct {
+			Formula json.RawMessage `json:"formula"`
+		} `json:"depends_on"`
+		Artifacts []json.RawMessage `json:"artifacts"`
 	} `json:"casks"`
 }
 
@@ -219,6 +222,18 @@ func (c *Client) Inventory(ctx context.Context) (*Snapshot, error) {
 			Deps: []string{}, AllDeps: []string{}, Apps: caskApps(k.Artifacts),
 			Zap: caskZap(k.Artifacts),
 		}
+		// Tools an app needs from Homebrew, given as one name or a list.
+		var many []string
+		var one string
+		if json.Unmarshal(k.DependsOn.Formula, &many) == nil {
+			p.Deps = append(p.Deps, many...)
+		} else if json.Unmarshal(k.DependsOn.Formula, &one) == nil && one != "" {
+			p.Deps = append(p.Deps, one)
+		}
+		for i, d := range p.Deps {
+			p.Deps[i] = shortName(d)
+		}
+		p.AllDeps = append(p.AllDeps, p.Deps...)
 		if len(k.Names) > 0 && k.Names[0] != "" {
 			p.DisplayName = k.Names[0]
 		}

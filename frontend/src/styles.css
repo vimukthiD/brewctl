@@ -2609,3 +2609,328 @@ button.rank-row:hover {
     transition: none;
   }
 }
+
+/* ---------- dependency map ---------- */
+
+.svc-icon {
+  color: var(--text-2);
+  flex: none;
+}
+
+.svc-sub {
+  display: block;
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+
+.depmap {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  animation: depmap-in 0.16s ease-out;
+}
+
+@keyframes depmap-in {
+  from {
+    opacity: 0;
+    transform: scale(0.99);
+  }
+}
+
+.depmap-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 52px;
+  padding: 0 16px 0 12px;
+  border-bottom: 1px solid var(--border);
+  --wails-draggable: drag;
+  flex: none;
+}
+
+.depmap-head button {
+  --wails-draggable: no-drag;
+}
+
+.depmap-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.depmap-title h2 {
+  font: 600 14px var(--mono);
+}
+
+.depmap-title span {
+  color: var(--text-2);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.seg {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--sunken);
+  border: 1px solid var(--border);
+}
+
+.seg button {
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.seg button.is-on {
+  background: var(--card);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  font-weight: 550;
+}
+
+.depmap-facts {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  padding: 10px 20px;
+  font-size: 12px;
+  color: var(--text-2);
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+
+.depmap-fact {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.depmap-legend {
+  display: inline-flex;
+  gap: 14px;
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+
+.depmap-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.depmap-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--card);
+  border: 1.5px solid var(--border-strong);
+  flex: none;
+}
+
+.depmap-swatch.is-you {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.depmap-swatch.is-vuln {
+  border-color: var(--red);
+  background: var(--red-soft);
+}
+
+.depmap-swatch.is-only {
+  border-style: dashed;
+  border-color: var(--text-2);
+}
+
+.depmap-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+}
+
+.depmap-canvas {
+  position: relative;
+  min-width: 100%;
+  min-height: 100%;
+  margin: 0 auto;
+}
+
+.depmap-col {
+  position: absolute;
+  top: 14px;
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-align: center;
+}
+
+.depmap-lines {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.depmap-lines path {
+  fill: none;
+  stroke: var(--border-strong);
+  stroke-width: 1.25;
+  transition: stroke 0.12s, opacity 0.12s;
+}
+
+.depmap-lines path.is-on {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.depmap-lines path.is-dim {
+  opacity: 0.25;
+}
+
+.depmap-node {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: var(--card);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow);
+  transition: opacity 0.12s, border-color 0.12s, background 0.12s, transform 0.12s;
+}
+
+.depmap-node:hover,
+.depmap-node.is-hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.depmap-node.is-you {
+  border-color: var(--accent);
+  background: linear-gradient(var(--accent-soft), var(--accent-soft)), var(--card);
+}
+
+.depmap-node.is-only {
+  border-style: dashed;
+}
+
+.depmap-node.is-vuln {
+  border-color: var(--red);
+  background: linear-gradient(var(--red-soft), var(--red-soft)), var(--card);
+}
+
+.depmap-node.is-focus {
+  border: 2px solid var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 650;
+  box-shadow: 0 0 0 5px var(--accent-soft), var(--shadow);
+}
+
+.depmap-node.is-focus .depmap-size {
+  color: inherit;
+  opacity: 0.7;
+}
+
+.depmap-node.is-dim {
+  opacity: 0.32;
+}
+
+.depmap-name {
+  flex: 1;
+  min-width: 0;
+  font: 12px var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.depmap-size {
+  color: var(--text-3);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.depmap-foot {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 8px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--card);
+  font-size: 12px;
+  flex: none;
+}
+
+.depmap-foot .quiet {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.depmap-chain {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.depmap-chain b {
+  font: 600 12px var(--mono);
+}
+
+.depmap-chain b.is-end {
+  color: var(--accent-text);
+}
+
+.depmap-arrow {
+  margin: 0 6px;
+  color: var(--text-3);
+}
+
+.depmap-sizer {
+  position: relative;
+  flex: none;
+  margin: auto; /* centred while smaller than the window, scrollable when bigger */
+}
+
+.depmap-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  min-width: 0;
+  min-height: 0;
+  transform-origin: 0 0;
+}
+
+.depmap-zoom {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.depmap-zoom .icon-btn.is-on {
+  color: var(--accent-text);
+}
+
+.depmap-pct {
+  min-width: 38px;
+  text-align: center;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}

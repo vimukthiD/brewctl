@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { ArrowUpCircle, ExternalLink, Pin, PinOff, Trash2, X } from "lucide-react";
+import { ArrowUpCircle, ExternalLink, Network, Pin, PinOff, Trash2, X } from "lucide-react";
 import { Button, CommandHint, JobProgress, PkgTags } from "./components";
-import { formatBytes, formatDate, openURL, timeAgo, vulnLabel } from "./lib/api";
+import { formatBytes, formatDate, openURL, plural, timeAgo, vulnLabel } from "./lib/api";
+import { closure } from "./lib/graph";
 import { useBrew } from "./state";
 
 function DepChips({ names, empty }: { names: string[]; empty: string }) {
@@ -22,23 +23,25 @@ function DepChips({ names, empty }: { names: string[]; empty: string }) {
 }
 
 export function Drawer() {
-  const { selected: p, select, sizes, usedBy, upgrade, setPinned, busy, jobFor, confirming, uninstallTarget, requestUninstall, services, setView, vulnBy } = useBrew();
+  const { selected: p, select, sizes, usedBy, upgrade, setPinned, busy, jobFor, confirming, uninstallTarget, requestUninstall, services, setView, vulnBy, graph, showMap, mapKey } = useBrew();
   const [showAll, setShowAll] = useState(false);
 
   useEffect(() => setShowAll(false), [p?.key]);
 
   useEffect(() => {
-    if (!p || confirming || uninstallTarget) return;
+    if (!p || confirming || uninstallTarget || mapKey) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") select(null);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [p, select, confirming, uninstallTarget]);
+  }, [p, select, confirming, uninstallTarget, mapKey]);
 
   if (!p) return null;
 
   const dependents = p.kind === "formula" ? usedBy.get(p.short) ?? [] : [];
+  const nNeeds = closure(graph.needs, p.key).size;
+  const nNeededBy = closure(graph.neededBy, p.key).size;
   const indirect = p.allDeps.filter((d) => !p.deps.includes(d));
   const service = p.kind === "formula" ? (services ?? []).find((s) => s.name === p.short) : undefined;
   const isBusy = busy.has(p.key);
@@ -128,6 +131,19 @@ export function Drawer() {
 
         {p.outdated && p.pinned && <p className="note">Pinned at {p.version}. Unpin it to upgrade to {p.latest}.</p>}
         {p.kind === "cask" && p.autoUpdates && <p className="note">This app updates itself, so Homebrew doesn't upgrade it.</p>}
+
+        {(nNeeds > 0 || nNeededBy > 0) && (
+          <button type="button" className="svc-link" onClick={() => showMap(p.key)}>
+            <Network size={14} className="svc-icon" aria-hidden />
+            <span>
+              Dependency map
+              <span className="svc-sub">
+                {[nNeeds && `needs ${plural(nNeeds, "package")}`, nNeededBy && `needed by ${plural(nNeededBy, "package")}`].filter(Boolean).join(" · ")}
+              </span>
+            </span>
+            <span className="svc-go">Open</span>
+          </button>
+        )}
 
         {p.kind === "formula" && (
           <>

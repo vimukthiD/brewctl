@@ -12,6 +12,10 @@ doubles as a cheat sheet.
 - **Overview**: counts, disk usage by category, largest packages, pending updates.
 - **Installed**: searchable, sortable list. Click a package for its details,
   what it needs, what needs it, and upgrade / pin / uninstall.
+- **Dependency map**: from any package's details, a map of everything it
+  needs and everything that needs it. Point at a package to see the chain
+  that connects them, click one to re-centre on it. It also says which tools
+  you installed pulled a package in, and how much is installed only for it.
 - **Leftover check**: before uninstalling, lists what `brew uninstall` would
   leave behind (cached download, config under the Homebrew prefix, a cask's own
   files, same-named folders in your home and in /Library) and clears what you

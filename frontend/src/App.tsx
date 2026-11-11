@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowUpCircle, Beer, Compass, LayoutDashboard, Server, Package, RefreshCw, Search, ShieldAlert, Sparkles, TerminalSquare, X } from "lucide-react";
 import { Button, CommandHint, ConfirmDialog, Spinner, Toasts } from "./components";
+import { DepMap } from "./DepMap";
 import { Drawer } from "./Drawer";
 import { UninstallDialog } from "./UninstallDialog";
 import { isActive, openURL, timeAgo } from "./lib/api";
@@ -240,6 +241,7 @@ export default function App() {
         </div>
         <Drawer />
         <RemoteDrawer />
+        <DepMap />
       </main>
 
       <Toasts />

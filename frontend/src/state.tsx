@@ -30,6 +30,7 @@ import {
   type ServiceVerb,
   type Status,
 } from "./lib/api";
+import { buildGraph, type DepGraph } from "./lib/graph";
 
 export type View = "overview" | "installed" | "discover" | "updates" | "security" | "services" | "cleanup" | "activity";
 
@@ -52,6 +53,13 @@ interface Ctx {
   status: Status | null;
   pkgs: Pkg[];
   byShort: Map<string, Pkg>;
+  /** Every package by key. */
+  byKey: Map<string, Pkg>;
+  /** What each package needs and is needed by, by key. */
+  graph: DepGraph;
+  /** The package the dependency map is centred on, if it's open. */
+  mapKey: string | null;
+  showMap: (key: string | null) => void;
   usedBy: Map<string, string[]>;
   sizes: Record<string, number> | null;
   cacheSize: number | null;
@@ -138,6 +146,7 @@ export function BrewProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const [remote, setRemote] = useState<Ref | null>(null);
+  const [mapKey, setMapKey] = useState<string | null>(null);
   const [uninstallTarget, setUninstallTarget] = useState<Pkg | null>(null);
   const pendingLeftovers = useRef<Record<number, { name: string; kind: string; paths: string[] }>>({});
 
@@ -329,6 +338,9 @@ export function BrewProvider({ children }: { children: ReactNode }) {
 
   // A finding is about one exact version: once the package is upgraded or
   // removed it no longer applies, even before the next check.
+  const byKey = useMemo(() => new Map(pkgs.map((p) => [p.key, p])), [pkgs]);
+  const graph = useMemo(() => buildGraph(pkgs, byShort), [pkgs, byShort]);
+
   const vulnFindings = useMemo(
     () =>
       (security?.report?.findings ?? []).filter((f) => {
@@ -481,6 +493,10 @@ export function BrewProvider({ children }: { children: ReactNode }) {
     status,
     pkgs,
     byShort,
+    byKey,
+    graph,
+    mapKey,
+    showMap: setMapKey,
     usedBy,
     sizes,
     cacheSize,
@@ -509,6 +525,7 @@ export function BrewProvider({ children }: { children: ReactNode }) {
           .catch(() => {});
       }
       setView(v);
+      setMapKey(null);
       if (v !== "activity") setFocusJob(null);
     },
     selected,
