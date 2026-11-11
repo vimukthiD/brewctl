@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"syscall"
 )
 
 // Client is a located Homebrew installation.
@@ -115,6 +116,55 @@ func (c *Client) command(ctx context.Context, args ...string) *exec.Cmd {
 	cmd.Env = c.env()
 	cmd.Dir = os.TempDir()
 	return cmd
+}
+
+// reclaimScript runs as root: the optional brew command first, then hands
+// a package's folder back to the user.
+const reclaimScript = `b=$1; o=$2; k=$3; shift 3
+if [ $# -gt 0 ]; then "$b" "$@" || exit; fi
+/usr/sbin/chown -R "$o" "$k"`
+
+// sudoCommand runs `sudo -A brew args...`: sudo asks for the password
+// through the program in SUDO_ASKPASS, which the caller sets. With reclaim
+// set, the same password also hands that folder back to this account.
+func (c *Client) sudoCommand(ctx context.Context, reclaim string, args ...string) *exec.Cmd {
+	sudoArgs := append([]string{"-A", "--", c.Path}, args...)
+	if reclaim != "" {
+		sudoArgs = append([]string{"-A", "--", "/bin/sh", "-c", reclaimScript, "sh",
+			c.Path, fmt.Sprint(os.Getuid()), reclaim}, args...)
+	}
+	cmd := exec.CommandContext(ctx, "/usr/bin/sudo", sudoArgs...)
+	cmd.Env = c.env()
+	cmd.Dir = os.TempDir()
+	return cmd
+}
+
+// RootOwnedRack returns the formula's folder in the Cellar if anything in
+// it belongs to root. Starting a service with `sudo brew services` does
+// that on purpose, and `brew uninstall` then can't delete those files.
+func (c *Client) RootOwnedRack(name string) string {
+	short := name[strings.LastIndex(name, "/")+1:]
+	if !ValidName(short) || c.Cellar == "" {
+		return ""
+	}
+	rack := filepath.Join(c.Cellar, short)
+	found := false
+	_ = filepath.WalkDir(rack, func(path string, d os.DirEntry, err error) error {
+		if err != nil || found {
+			return filepath.SkipAll
+		}
+		if info, err := d.Info(); err == nil {
+			if st, ok := info.Sys().(*syscall.Stat_t); ok && st.Uid == 0 {
+				found = true
+				return filepath.SkipAll
+			}
+		}
+		return nil
+	})
+	if found {
+		return rack
+	}
+	return ""
 }
 
 // Run executes a read-only brew command and returns its stdout.

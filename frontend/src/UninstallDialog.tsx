@@ -1,18 +1,28 @@
 import { useEffect, useMemo, useState } from "react";
-import { Trash2 } from "lucide-react";
+import { Lock, Trash2 } from "lucide-react";
 import { Button, CommandHint, Spinner } from "./components";
-import { Brew, LEFTOVER_GROUPS, errorMessage, formatBytes, plural, type Leftover, type Pkg } from "./lib/api";
+import { Brew, LEFTOVER_GROUPS, errorMessage, formatBytes, plural, type Leftover, type Pkg, type UninstallPlan } from "./lib/api";
 import { useBrew } from "./state";
 
 /** Confirms an uninstall and offers to clear what `brew uninstall` leaves behind. */
 export function UninstallDialog({ p }: { p: Pkg }) {
-  const { requestUninstall, uninstall, services } = useBrew();
-  const service = p.kind === "formula" ? (services ?? []).find((s) => s.name === p.short && (s.running || s.registered)) : undefined;
+  const { requestUninstall, uninstall } = useBrew();
+  const [plan, setPlan] = useState<UninstallPlan | null>(null);
   const [found, setFound] = useState<Leftover[] | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
 
   const close = () => requestUninstall(null);
+
+  useEffect(() => {
+    let live = true;
+    Brew.UninstallPlan({ name: p.name, kind: p.kind })
+      .then((pl) => live && setPlan(pl))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [p.name, p.kind]);
 
   useEffect(() => {
     let live = true;
@@ -53,6 +63,7 @@ export function UninstallDialog({ p }: { p: Pkg }) {
   );
   const pickedBytes = (found ?? []).filter((l) => picked.has(l.path)).reduce((n, l) => n + l.size, 0);
   const trashCount = (found ?? []).filter((l) => picked.has(l.path) && l.source !== "cache").length;
+  const adminCount = (found ?? []).filter((l) => picked.has(l.path) && l.admin).length;
 
   const toggle = (path: string) =>
     setPicked((cur) => {
@@ -78,12 +89,19 @@ export function UninstallDialog({ p }: { p: Pkg }) {
               ? `Removes ${p.short} from your Mac. Its dependencies stay until you clear unused ones from Cleanup.`
               : `Removes ${p.short} from your Mac.`}
         </div>
-        {service && (
+        {plan?.stopService && (
           <div className="dialog-body">
-            Its background service is {service.running ? "running" : "set to start at login"}, so Brewctl stops it first. Homebrew would otherwise leave it running.
+            {plan.rootService
+              ? `Its background service runs as the system administrator and is ${plan.running ? "running" : "set to start with the Mac"}. Brewctl stops it first and gives its files back to you, which asks for your Mac password. If that doesn't work, nothing is uninstalled.`
+              : `Its background service is ${plan.running ? "running" : "set to start at login"}, so Brewctl stops it first. Homebrew would otherwise leave it running.`}
           </div>
         )}
-        <CommandHint command={`${service ? `brew services stop ${p.short} && ` : ""}brew uninstall ${flag}${p.name}`} />
+        {plan?.reclaim && !plan.rootService && (
+          <div className="dialog-body">
+            Its service once ran as the system administrator, which left some of its files owned by the system. Brewctl gives them back to you first, which asks for your Mac password.
+          </div>
+        )}
+        <CommandHint command={plan?.command ?? `brew uninstall ${flag}${p.name}`} />
 
         <div className="leftovers">
           {found === null ? (
@@ -109,13 +127,23 @@ export function UninstallDialog({ p }: { p: Pkg }) {
                       <label key={l.path} className="leftover" title={l.path}>
                         <input type="checkbox" checked={picked.has(l.path)} onChange={() => toggle(l.path)} />
                         <span className="leftover-path">{l.label}</span>
+                        {l.admin && (
+                          <span className="leftover-lock" title="A system file: removing it needs your Mac password">
+                            <Lock size={11} aria-label="Needs your password" />
+                          </span>
+                        )}
                         <span className="leftover-size">{formatBytes(l.size)}</span>
                       </label>
                     ))}
                   </fieldset>
                 ))}
               </div>
-              {trashCount > 0 && <p className="leftovers-foot">{plural(trashCount, "item")} will go to the Trash, so you can put {trashCount === 1 ? "it" : "them"} back.</p>}
+              {trashCount > 0 && (
+                <p className="leftovers-foot">
+                  {plural(trashCount, "item")} will go to the Trash, so you can put {trashCount === 1 ? "it" : "them"} back.
+                  {adminCount > 0 && ` ${adminCount === 1 ? "One is a system file" : `${adminCount} are system files`}, so Brewctl asks for your Mac password once the uninstall is done.`}
+                </p>
+              )}
             </>
           )}
         </div>

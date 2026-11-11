@@ -1965,6 +1965,12 @@ button.rank-row:hover {
   white-space: nowrap;
 }
 
+.leftover-lock {
+  display: inline-flex;
+  color: var(--text-2);
+  flex: none;
+}
+
 .leftover-size {
   color: var(--text-2);
   font-size: 12px;

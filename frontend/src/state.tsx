@@ -253,7 +253,17 @@ export function BrewProvider({ children }: { children: ReactNode }) {
           .then((res) => {
             const failed = res?.failed ?? [];
             if (res?.removed) toast({ tone: "ok", text: `Cleared ${plural(res.removed, "leftover")} (${formatBytes(res.freed)})` });
-            if (failed.length) toast({ tone: "error", text: `Couldn't remove ${failed.join(", ")}` });
+            if (failed.length && res?.passwordIssue) {
+              const why =
+                res.passwordIssue === "cancelled"
+                  ? "the password prompt was cancelled"
+                  : res.passwordIssue === "wrong"
+                    ? "the password wasn't accepted"
+                    : res.passwordIssue === "notadmin"
+                      ? "this account isn't an administrator"
+                      : "Brewctl couldn't ask for your password";
+              toast({ tone: "error", text: `${plural(failed.length, "system file")} left in place: ${why}` });
+            } else if (failed.length) toast({ tone: "error", text: `Couldn't remove ${failed.join(", ")}` });
           })
           .catch((e) => toast({ tone: "error", text: `Leftovers not removed: ${errorMessage(e)}` }));
       }

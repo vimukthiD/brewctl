@@ -34,6 +34,9 @@ type Package struct {
 	Disabled    bool     `json:"disabled"`
 	Apps        []string `json:"apps"` // cask .app artifacts
 	Zap         []string `json:"zap"`  // paths a cask lists as its own files
+	// ServiceRoot means the formula's service must run as root, so it is
+	// started and stopped with `sudo brew services`.
+	ServiceRoot bool `json:"serviceRoot"`
 }
 
 // Snapshot is the full installed inventory at a point in time.
@@ -44,21 +47,24 @@ type Snapshot struct {
 
 type rawInfo struct {
 	Formulae []struct {
-		Name       string   `json:"name"`
-		FullName   string   `json:"full_name"`
-		Desc       string   `json:"desc"`
-		Homepage   string   `json:"homepage"`
-		License    string   `json:"license"`
-		Tap        string   `json:"tap"`
-		Revision   int      `json:"revision"`
-		Outdated   bool     `json:"outdated"`
-		Pinned     bool     `json:"pinned"`
-		KegOnly    bool     `json:"keg_only"`
-		Caveats    string   `json:"caveats"`
-		Deprecated bool     `json:"deprecated"`
-		Disabled   bool     `json:"disabled"`
-		Deps       []string `json:"dependencies"`
-		Versions   struct {
+		Name       string `json:"name"`
+		FullName   string `json:"full_name"`
+		Desc       string `json:"desc"`
+		Homepage   string `json:"homepage"`
+		License    string `json:"license"`
+		Tap        string `json:"tap"`
+		Revision   int    `json:"revision"`
+		Outdated   bool   `json:"outdated"`
+		Pinned     bool   `json:"pinned"`
+		KegOnly    bool   `json:"keg_only"`
+		Caveats    string `json:"caveats"`
+		Deprecated bool   `json:"deprecated"`
+		Disabled   bool   `json:"disabled"`
+		Service    *struct {
+			RequireRoot bool `json:"require_root"`
+		} `json:"service"`
+		Deps     []string `json:"dependencies"`
+		Versions struct {
 			Stable string `json:"stable"`
 		} `json:"versions"`
 		Installed []struct {
@@ -157,7 +163,8 @@ func (c *Client) Inventory(ctx context.Context) (*Snapshot, error) {
 			Pinned: f.Pinned, OnRequest: inst.OnRequest, InstalledAt: inst.Time,
 			Caveats: f.Caveats, KegOnly: f.KegOnly,
 			Deprecated: f.Deprecated, Disabled: f.Disabled,
-			Deps: []string{}, AllDeps: []string{}, Apps: []string{}, Zap: []string{},
+			ServiceRoot: f.Service != nil && f.Service.RequireRoot,
+			Deps:        []string{}, AllDeps: []string{}, Apps: []string{}, Zap: []string{},
 		}
 		if f.Tap != "" && f.Tap != "homebrew/core" && f.FullName != "" {
 			p.Name = f.FullName

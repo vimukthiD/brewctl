@@ -11,10 +11,10 @@ import type {
   Vuln,
   Remote as RawRemote,
 } from "../../bindings/dev.vimukthid/brewctl/internal/brew/models";
-import type { Status, SecurityState } from "../../bindings/dev.vimukthid/brewctl/models";
+import type { Status, SecurityState, UninstallPlan } from "../../bindings/dev.vimukthid/brewctl/models";
 
 export { Brew };
-export type { Status, Leftover, SearchResult, Service, Finding, Vuln, SecurityState };
+export type { Status, Leftover, SearchResult, Service, Finding, Vuln, SecurityState, UninstallPlan };
 
 /** "3 known vulnerabilities", for a finding. */
 export function vulnLabel(f: Finding): string {

@@ -3,11 +3,14 @@ package brew
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestValidName(t *testing.T) {
@@ -163,7 +166,7 @@ func TestLeftoversScanAndRemove(t *testing.T) {
 
 	// Paths outside the scan are refused; cache entries are deleted with their target.
 	outside := mk("Documents/keep")
-	res := c.RemoveLeftovers(context.Background(), found, []string{link, outside, filepath.Join(home, ".config")})
+	res := c.RemoveLeftovers(context.Background(), found, []string{link, outside, filepath.Join(home, ".config")}, "test")
 	if res.Removed != 1 || len(res.Failed) != 2 {
 		t.Errorf("RemoveLeftovers = %+v", res)
 	}
@@ -334,5 +337,109 @@ func TestSecurityStore(t *testing.T) {
 	s.Record(report(400, "A"))
 	if fresh := s.Record(report(500, "A", "B")); len(fresh) != 1 {
 		t.Errorf("a returning vulnerability should be new, got %+v", fresh)
+	}
+}
+
+func TestSystemRemovable(t *testing.T) {
+	c := &Client{Prefix: "/opt/homebrew", Cellar: "/opt/homebrew/Cellar", Caskroom: "/opt/homebrew/Caskroom", Cache: "/Users/x/Library/Caches/Homebrew"}
+	for path, want := range map[string]bool{
+		"/Library/Logs/zoomusinstall.log":          true,
+		"/Library/Application Support/demo":        true,
+		"/Library/Logs/DiagnosticReports/demo.ips": true,
+		"/Library":                                   false,
+		"/Library/Logs":                              false,
+		"/Library/Application Support":               false,
+		"/Library/Logs/DiagnosticReports":            false,
+		"/Library/Audio/Plug-Ins/HAL":                false,
+		"/Library/Preferences/com.apple.loginwindow": false,
+		"/Library/Apple/usr":                         false,
+		"/Library/Logs/demo\nevil":                   false,
+		"/Library/Logs/../../etc/hosts":              false,
+		"/Library/NoSuchFolder/demo":                 false, // parent must resolve
+	} {
+		if got := c.removable(path, "/Users/x"); got != want {
+			t.Errorf("removable(%q) = %v, want %v", path, got, want)
+		}
+	}
+}
+
+func TestAdminTrashScript(t *testing.T) {
+	dir := t.TempDir()
+	staging := filepath.Join(dir, "staging")
+	os.MkdirAll(staging, 0o700)
+	src := filepath.Join(dir, "src")
+	os.MkdirAll(filepath.Join(src, "app folder"), 0o755)
+	os.WriteFile(filepath.Join(src, "app folder", "f"), []byte("x"), 0o644)
+	os.WriteFile(filepath.Join(src, "a.log"), []byte("x"), 0o644)
+	os.WriteFile(filepath.Join(staging, "a.log"), []byte("older"), 0o644) // name clash
+	weird := filepath.Join(src, "-n $(touch pwned)")
+	os.WriteFile(weird, []byte("x"), 0o644)
+
+	paths := []string{filepath.Join(src, "app folder"), filepath.Join(src, "a.log"), weird, filepath.Join(src, "missing")}
+	cmd := exec.Command("/bin/sh", adminTrashArgs(staging, fmt.Sprint(os.Getuid()), paths)...)
+	cmd.Dir = dir
+	out, _ := cmd.Output()
+	got := parseStaged(out)
+	want := map[string]string{
+		paths[0]: filepath.Join(staging, "app folder"),
+		paths[1]: filepath.Join(staging, "a.log 2"),
+		paths[2]: filepath.Join(staging, "-n $(touch pwned)"),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("staged %q, want %q", got, want)
+	}
+	for _, dest := range want {
+		if _, err := os.Lstat(dest); err != nil {
+			t.Errorf("%s not staged", dest)
+		}
+	}
+	if b, _ := os.ReadFile(filepath.Join(staging, "a.log")); string(b) != "older" {
+		t.Error("existing staged item was overwritten")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "pwned")); err == nil {
+		t.Error("a path was run as a command")
+	}
+}
+
+func TestRunnerSkipsAfterFailure(t *testing.T) {
+	fake := filepath.Join(t.TempDir(), "brew")
+	os.WriteFile(fake, []byte("#!/bin/sh\nexit \"$1\"\n"), 0o755)
+	r := NewRunner(&Client{Path: fake}, func(string, any) {})
+	first := r.EnqueueWith("Stop demo", Opts{}, "1")
+	second := r.EnqueueWith("Uninstall demo", Opts{After: first.ID}, "0")
+	ok := r.EnqueueWith("Stop other", Opts{}, "0")
+	third := r.EnqueueWith("Uninstall other", Opts{After: ok.ID}, "0")
+	deadline := time.Now().Add(10 * time.Second)
+	status := map[int]string{}
+	for time.Now().Before(deadline) {
+		for _, j := range r.List() {
+			status[j.ID] = j.Status
+		}
+		if status[third.ID] == StatusDone || status[third.ID] == StatusCancelled {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if status[first.ID] != StatusFailed || status[second.ID] != StatusCancelled || status[third.ID] != StatusDone {
+		t.Errorf("statuses = %v", status)
+	}
+
+	// A runner with no worker: nothing actually runs sudo here.
+	idle := &Runner{client: &Client{Path: fake}, emit: func(string, any) {}, queue: make(chan *Job, 4), nextID: 1}
+	if got := idle.EnqueueWith("x", Opts{Admin: true}, "services", "stop", "x").Command; got != "sudo brew services stop x" {
+		t.Errorf("admin command = %q", got)
+	}
+}
+
+func TestApplyLaunchd(t *testing.T) {
+	sv := Service{User: "root"}
+	applyLaunchd(&sv, []byte("system/sh.brew.demo = {\n\tstate = running\n\tpid = 4242\n\tlast exit code = (never exited)\n}"))
+	if !sv.Running || sv.Pid != 4242 || sv.ExitCode != nil || sv.Status != "started" {
+		t.Errorf("running: %+v", sv)
+	}
+	sv = Service{User: "root"}
+	applyLaunchd(&sv, []byte("system/sh.brew.demo = {\n\tstate = not running\n\tlast exit code = 78: EX_CONFIG\n}"))
+	if sv.Running || sv.ExitCode == nil || *sv.ExitCode != 78 {
+		t.Errorf("stopped: %+v", sv)
 	}
 }

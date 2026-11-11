@@ -6,13 +6,13 @@ import { useBrew } from "../state";
 
 const IDEAS = ["postgresql", "redis", "nginx", "mysql", "ollama"];
 
-function describe(s: Service): { tone: "running" | "error" | "idle" | "scheduled"; text: string } {
+function describe(s: Service, isRoot: boolean): { tone: "running" | "error" | "idle" | "scheduled"; text: string } {
   if (s.running) return { tone: "running", text: s.pid ? `Running · pid ${s.pid}` : "Running" };
   if (s.status === "error" || (s.exitCode != null && s.exitCode !== 0)) {
     return { tone: "error", text: `Stopped with an error${s.exitCode != null ? ` (exit code ${s.exitCode})` : ""}` };
   }
   if (s.status === "scheduled") return { tone: "scheduled", text: "Scheduled · runs on a timer" };
-  if (s.registered) return { tone: "idle", text: "Not running · starts at next login" };
+  if (s.registered) return { tone: "idle", text: isRoot ? "Not running · starts when the Mac starts" : "Not running · starts at next login" };
   return { tone: "idle", text: "Not running" };
 }
 
@@ -23,12 +23,14 @@ function Row({ s }: { s: Service }) {
   const [logError, setLogError] = useState<string | null>(null);
 
   const pkg = byShort.get(s.name);
-  const state = describe(s);
   const key = `service:${s.name}`;
   const working = busy.has(key);
   const job = jobFor(key);
-  const isRoot = s.user === "root";
+  // Runs as root now, or (while stopped) its formula says it must.
+  const isRoot = s.user === "root" || (!s.user && !!pkg?.serviceRoot);
   const hasLog = !!(s.logPath || s.errorLog);
+  const sudo = isRoot ? "sudo " : "";
+  const state = describe(s, isRoot);
 
   useEffect(() => {
     if (!open || !hasLog) return;
@@ -48,7 +50,7 @@ function Row({ s }: { s: Service }) {
       body: <>Anything using it will lose its connection. It also won't start by itself at login until you start it again.</>,
       confirmLabel: "Stop",
       danger: true,
-      command: `brew services stop ${s.name}`,
+      command: `${sudo}brew services stop ${s.name}`,
     });
     if (ok) serviceAction(s.name, "stop");
   };
@@ -61,31 +63,29 @@ function Row({ s }: { s: Service }) {
           <span className="svc-main">
             <span className="svc-title">
               <span className="name">{s.name}</span>
-              {s.registered && <Tag title="Starts by itself when you log in">at login</Tag>}
+              {s.registered && (isRoot ? <Tag title="Starts by itself when the Mac starts">at startup</Tag> : <Tag title="Starts by itself when you log in">at login</Tag>)}
               {isRoot && <Tag tone="blue" title="Runs as the system administrator">system</Tag>}
             </span>
             <span className="cell-desc">{state.text}</span>
           </span>
           <ChevronDown size={14} className="svc-chev" />
         </button>
-        {!isRoot && (
-          <div className="svc-actions">
-            {s.running ? (
-              <>
-                <Button size="sm" icon={<RotateCw size={13} />} disabled={working} onClick={() => serviceAction(s.name, "restart")}>
-                  Restart
-                </Button>
-                <Button size="sm" variant="danger" icon={<Square size={12} />} disabled={working} onClick={stop}>
-                  Stop
-                </Button>
-              </>
-            ) : (
-              <Button size="sm" variant="primary" icon={<Play size={13} />} busy={working} onClick={() => serviceAction(s.name, "start")}>
-                Start
+        <div className="svc-actions">
+          {s.running ? (
+            <>
+              <Button size="sm" icon={<RotateCw size={13} />} disabled={working} onClick={() => serviceAction(s.name, "restart")}>
+                Restart
               </Button>
-            )}
-          </div>
-        )}
+              <Button size="sm" variant="danger" icon={<Square size={12} />} disabled={working} onClick={stop}>
+                Stop
+              </Button>
+            </>
+          ) : (
+            <Button size="sm" variant="primary" icon={<Play size={13} />} busy={working} onClick={() => serviceAction(s.name, "start")}>
+              Start
+            </Button>
+          )}
+        </div>
       </div>
 
       {job && <JobProgress job={job} />}
@@ -100,15 +100,14 @@ function Row({ s }: { s: Service }) {
               </button>
             </p>
           )}
-          {isRoot && <p className="note">This service runs as the system administrator, which Brewctl doesn't manage. Use Terminal:</p>}
-          {isRoot && <CommandHint command={`sudo brew services restart ${s.name}`} />}
+          {isRoot && <p className="note">This service runs as the system administrator, so starting or stopping it asks for your Mac password.</p>}
 
-          {!isRoot && !s.running && (
+          {!s.running && (
             <div className="svc-alt">
               <button type="button" className="more" disabled={working} onClick={() => serviceAction(s.name, "run")}>
                 Run now only
               </button>
-              <span className="quiet">Starts it without adding it to login. “Start” does both.</span>
+              <span className="quiet">{isRoot ? "Starts it without setting it to start with the Mac. “Start” does both." : "Starts it without adding it to login. “Start” does both."}</span>
             </div>
           )}
 
@@ -147,7 +146,7 @@ function Row({ s }: { s: Service }) {
           )}
 
           <h3 className="sub">In Terminal</h3>
-          <CommandHint command={`brew services ${s.running ? "restart" : "start"} ${s.name}`} />
+          <CommandHint command={`${sudo}brew services ${s.running ? "restart" : "start"} ${s.name}`} />
         </div>
       )}
     </li>

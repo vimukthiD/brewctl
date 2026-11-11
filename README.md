@@ -14,8 +14,9 @@ doubles as a cheat sheet.
   what it needs, what needs it, and upgrade / pin / uninstall.
 - **Leftover check**: before uninstalling, lists what `brew uninstall` would
   leave behind (cached download, config under the Homebrew prefix, a cask's own
-  files, same-named folders in your home) and clears what you tick. Everything
-  except Homebrew's own download goes to the Trash.
+  files, same-named folders in your home and in /Library) and clears what you
+  tick. Everything except Homebrew's own download goes to the Trash. System
+  files are marked with a lock; clearing them asks for your password once.
 - **Discover**: search every tool and app in Homebrew by name or description,
   see what else it would install, and install it.
 - **Updates**: check for updates, upgrade one or all.
@@ -27,13 +28,16 @@ doubles as a cheat sheet.
   and versions of your tools to OSV.dev, so none runs until you ask.
 - **Services**: background services Homebrew runs (databases, daemons): see
   which are running, start, stop or restart them, and read their logs.
+  Services that run as root (like dnsmasq) work too, with your password.
   Uninstalling a package stops its service first, which `brew uninstall`
-  alone doesn't do.
+  alone doesn't do, and gives back any files a root service left owned by
+  the system, so the uninstall doesn't fail.
 - **Cleanup**: unused dependencies, old versions, the download cache.
 - **Activity**: live output of every command the app runs.
 
-Some apps need an admin password to install, upgrade or remove. When Homebrew
-asks for it, Brewctl shows the standard macOS password dialog. The password
+Some apps need an admin password to install, upgrade or remove, and so do
+root services and system leftovers. Brewctl then shows the standard macOS
+password dialog. The password
 goes from that dialog straight to `sudo`; the app never sees, logs or stores
 it. Cancel the dialog and the job stops with nothing changed.
 

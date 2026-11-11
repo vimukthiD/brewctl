@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -74,13 +77,18 @@ func parseServices(out []byte) ([]Service, error) {
 		}
 		services = append(services, s)
 	}
+	sortServices(services)
+	return services, nil
+}
+
+// sortServices puts running services first, then by name.
+func sortServices(services []Service) {
 	sort.SliceStable(services, func(i, j int) bool {
 		if services[i].Running != services[j].Running {
 			return services[i].Running
 		}
 		return services[i].Name < services[j].Name
 	})
-	return services, nil
 }
 
 // Services lists every service the user's installed formulae provide.
@@ -92,7 +100,44 @@ func (c *Client) Services(ctx context.Context) ([]Service, error) {
 	if len(strings.TrimSpace(string(out))) == 0 {
 		return []Service{}, nil
 	}
-	return parseServices(out)
+	services, err := parseServices(out)
+	if err != nil {
+		return nil, err
+	}
+	// Asked as this user, brew can't see inside the system launchd domain,
+	// so a root service always looks stopped. launchd itself will say.
+	for i := range services {
+		sv := &services[i]
+		if sv.User != "root" || sv.Label == "" || !ValidName(sv.Label) {
+			continue
+		}
+		cmd := exec.CommandContext(ctx, "/bin/launchctl", "print", "system/"+sv.Label)
+		if out, err := cmd.Output(); err == nil {
+			applyLaunchd(sv, out)
+		}
+	}
+	sortServices(services)
+	return services, nil
+}
+
+var (
+	launchdPid  = regexp.MustCompile(`(?m)^\tpid = (\d+)$`)
+	launchdExit = regexp.MustCompile(`(?m)^\tlast exit code = (-?\d+)`)
+)
+
+// applyLaunchd fills in a root service's live state from `launchctl print`.
+func applyLaunchd(sv *Service, out []byte) {
+	if m := launchdPid.FindSubmatch(out); m != nil {
+		sv.Pid, _ = strconv.Atoi(string(m[1]))
+		sv.Running = sv.Pid > 0
+	}
+	if m := launchdExit.FindSubmatch(out); m != nil && !sv.Running {
+		code, _ := strconv.Atoi(string(m[1]))
+		sv.ExitCode = &code
+	}
+	if sv.Running {
+		sv.Status = "started"
+	}
 }
 
 // ServiceActions maps what the UI may ask for onto `brew services` verbs.

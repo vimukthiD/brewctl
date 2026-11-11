@@ -241,19 +241,87 @@ func (s *BrewService) Uninstall(ctx context.Context, p PkgRef) (brew.Job, error)
 	// `brew uninstall` leaves a formula's service running and registered at
 	// login, pointing at files that no longer exist. Stop it first; jobs run
 	// in order, so the uninstall follows.
+	// A service that runs as root needs `sudo brew services stop`. If the
+	// stop doesn't succeed (say the password prompt is cancelled), the
+	// uninstall is skipped rather than leaving the service orphaned.
+	var after int
+	plan := s.uninstallPlan(ctx, p)
+	short := p.Name[strings.LastIndex(p.Name, "/")+1:]
+	switch {
+	case plan.StopService && plan.RootService:
+		// One password stops it and hands its files back.
+		after = r.EnqueueWith("Stop "+short, brew.Opts{Admin: true, Reclaim: plan.Reclaim}, "services", "stop", short).ID
+	case plan.StopService:
+		after = r.EnqueueWith("Stop "+short, brew.Opts{}, "services", "stop", short).ID
+		if plan.Reclaim != "" {
+			after = r.EnqueueWith("Reclaim "+short+"'s files", brew.Opts{Admin: true, Reclaim: plan.Reclaim, After: after}).ID
+		}
+	case plan.Reclaim != "":
+		after = r.EnqueueWith("Reclaim "+short+"'s files", brew.Opts{Admin: true, Reclaim: plan.Reclaim}).ID
+	}
+	return r.EnqueueWith("Uninstall "+p.Name, brew.Opts{After: after}, "uninstall", flag, p.Name), nil
+}
+
+// UninstallPlan is what uninstalling a package involves beyond `brew uninstall`.
+type UninstallPlan struct {
+	StopService bool `json:"stopService"` // its service is running or registered
+	RootService bool `json:"rootService"` // ...as root, so stopping it needs the password
+	Running     bool `json:"running"`
+	// Reclaim is its Cellar folder when root owns files in it (left by
+	// running its service as root); the password hands them back first.
+	Reclaim string `json:"reclaim"`
+	Command string `json:"command"` // the equivalent Terminal commands
+}
+
+// UninstallPlan says what uninstalling p will do, for the confirmation.
+func (s *BrewService) UninstallPlan(ctx context.Context, p PkgRef) (UninstallPlan, error) {
+	if err := checkRef(p); err != nil {
+		return UninstallPlan{}, err
+	}
+	return s.uninstallPlan(ctx, p), nil
+}
+
+func (s *BrewService) uninstallPlan(ctx context.Context, p PkgRef) UninstallPlan {
+	flag, _ := kindFlag(p.Kind)
+	plan := UninstallPlan{}
+	var steps []string
 	if p.Kind == "formula" {
-		if c, _, err := s.ready(ctx); err == nil {
-			if services, err := c.Services(ctx); err == nil {
-				short := p.Name[strings.LastIndex(p.Name, "/")+1:]
-				for _, sv := range services {
-					if sv.Name == short && sv.Active() && sv.User != "root" {
-						r.Enqueue("Stop "+short, true, "services", "stop", short)
-					}
-				}
+		short := p.Name[strings.LastIndex(p.Name, "/")+1:]
+		if sv, ok := s.service(ctx, short); ok && sv.Active() {
+			plan.StopService, plan.RootService, plan.Running = true, s.asRoot(sv), sv.Running
+			stop := "brew services stop " + short
+			if plan.RootService {
+				stop = "sudo " + stop
 			}
+			steps = append(steps, stop)
+		}
+		if c, _, err := s.ready(ctx); err == nil {
+			plan.Reclaim = c.RootOwnedRack(p.Name)
+		}
+		if plan.Reclaim != "" {
+			steps = append(steps, "sudo chown -R $USER "+plan.Reclaim)
 		}
 	}
-	return r.Enqueue("Uninstall "+p.Name, true, "uninstall", flag, p.Name), nil
+	plan.Command = strings.Join(append(steps, "brew uninstall "+flag+" "+p.Name), " && ")
+	return plan
+}
+
+// service looks up one background service by name.
+func (s *BrewService) service(ctx context.Context, name string) (brew.Service, bool) {
+	c, _, err := s.ready(ctx)
+	if err != nil {
+		return brew.Service{}, false
+	}
+	services, err := c.Services(ctx)
+	if err != nil {
+		return brew.Service{}, false
+	}
+	for _, sv := range services {
+		if sv.Name == name {
+			return sv, true
+		}
+	}
+	return brew.Service{}, false
 }
 
 // SetPinned pins or unpins a formula so upgrades skip it.
@@ -356,7 +424,7 @@ func (s *BrewService) RemoveLeftovers(ctx context.Context, p PkgRef, paths []str
 	if _, err := c.Run(ctx, "list", flag, "--versions", p.Name); err == nil {
 		return brew.RemoveResult{}, fmt.Errorf("%s is still installed", p.Name)
 	}
-	return c.RemoveLeftovers(ctx, allowed, paths), nil
+	return c.RemoveLeftovers(ctx, allowed, paths, "Clear leftovers of "+p.Name), nil
 }
 
 // Search finds installable packages by name or description.
@@ -415,7 +483,30 @@ func (s *BrewService) ServiceAction(ctx context.Context, name, action string) (b
 	if !ok {
 		return brew.Job{}, fmt.Errorf("unknown service action %q", action)
 	}
-	return r.Enqueue(verb+" "+name, true, "services", action, name), nil
+	// Services that run as root are managed with `sudo brew services`.
+	sv, _ := s.service(ctx, name)
+	return r.EnqueueWith(verb+" "+name, brew.Opts{Admin: s.asRoot(sv)}, "services", action, name), nil
+}
+
+// asRoot reports whether a service is, or must be, run as root: either it
+// already runs as root, or its formula requires root to start it.
+func (s *BrewService) asRoot(sv brew.Service) bool {
+	if sv.User == "root" {
+		return true
+	}
+	if sv.User != "" {
+		return false // running as this user
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.snap != nil {
+		for _, p := range s.snap.Packages {
+			if p.Kind == "formula" && p.Name[strings.LastIndex(p.Name, "/")+1:] == sv.Name {
+				return p.ServiceRoot
+			}
+		}
+	}
+	return false
 }
 
 // ServiceLog returns the tail of a service's log files, if it has any.

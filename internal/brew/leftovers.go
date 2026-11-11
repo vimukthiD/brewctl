@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 )
 
 // Where a leftover was found, which is also how sure we are that it belongs
@@ -30,6 +32,30 @@ type Leftover struct {
 	Size   int64  `json:"size"`
 	Source string `json:"source"`
 	Dir    bool   `json:"dir"`
+	// Admin means removing it needs the admin password: it sits in a
+	// system folder this account can't change.
+	Admin bool `json:"admin"`
+}
+
+// systemRoot is the one place outside the home folder and Homebrew where
+// leftovers are looked for: apps keep their system-wide logs, caches and
+// helpers under /Library.
+const systemRoot = "/Library"
+
+// systemSpots are same-named places under /Library, like homeSpots.
+var systemSpots = []string{
+	"/Library/Application Support/%s",
+	"/Library/Caches/%s",
+	"/Library/Logs/%s",
+}
+
+// systemShared are folders under /Library that hold many things, beyond the
+// top level (which is always shared).
+var systemShared = []string{
+	"Application Support/Apple", "Audio/Plug-Ins", "Audio/Plug-Ins/HAL",
+	"Audio/Plug-Ins/Components", "Audio/Plug-Ins/VST", "Audio/Plug-Ins/VST3",
+	"Audio/MIDI Drivers", "Logs/DiagnosticReports", "Preferences/SystemConfiguration",
+	"Preferences/Logging", "Developer/CommandLineTools", "Apple/System",
 }
 
 // homeSpots are the places command-line tools conventionally keep their own
@@ -48,7 +74,7 @@ var homeSpots = []string{
 
 // prefixSpots are where formulae keep config and data under the Homebrew
 // prefix; uninstall deliberately leaves these in place.
-var prefixSpots = []string{"etc/%s", "var/%s", "var/lib/%s", "var/log/%s", "var/run/%s"}
+var prefixSpots = []string{"etc/%s", "etc/%s.conf", "etc/%s.d", "var/%s", "var/lib/%s", "var/log/%s", "var/run/%s"}
 
 // baseName drops the tap and any @version: "hashicorp/tap/terraform" and
 // "python@3.13" become "terraform" and "python".
@@ -77,7 +103,7 @@ func (c *Client) Leftovers(ctx context.Context, p Package) []Leftover {
 			return
 		}
 		seen[path] = true
-		l := Leftover{Path: path, Label: tilde(path, home), Source: source, Dir: info.IsDir()}
+		l := Leftover{Path: path, Label: tilde(path, home), Source: source, Dir: info.IsDir(), Admin: needsAdmin(path, info)}
 		if info.Mode()&os.ModeSymlink != 0 && source == SourceCache {
 			// Cache entries are symlinks into downloads/; report the real size.
 			if target, err := os.Stat(path); err == nil {
@@ -136,6 +162,11 @@ func (c *Client) Leftovers(ctx context.Context, p Package) []Leftover {
 			}
 		}
 	}
+	if len(base) >= 3 {
+		for _, spot := range systemSpots {
+			add(fmt.Sprintf(spot, base), SourceHome)
+		}
+	}
 
 	rank := map[string]int{SourceCache: 0, SourceHomebrew: 1, SourceZap: 2, SourceHome: 3}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -151,11 +182,15 @@ func (c *Client) Leftovers(ctx context.Context, p Package) []Leftover {
 }
 
 // removable is the safety net: a leftover must sit inside the home directory,
-// the Homebrew prefix or the Homebrew cache, at least two levels down, and
-// must not be one of the shared folders everything else lives in.
+// the Homebrew prefix or the Homebrew cache, at least two levels down, or
+// inside /Library at least two levels down, and must not be one of the shared
+// folders everything else lives in.
 func (c *Client) removable(path, home string) bool {
-	if !filepath.IsAbs(path) || path != filepath.Clean(path) {
+	if !filepath.IsAbs(path) || path != filepath.Clean(path) || strings.ContainsAny(path, "\n\x00") {
 		return false
+	}
+	if isSystemPath(path) {
+		return systemRemovable(path)
 	}
 	shared := map[string]bool{}
 	if home != "" {
@@ -189,6 +224,58 @@ func (c *Client) removable(path, home string) bool {
 	return false
 }
 
+func isSystemPath(path string) bool {
+	return strings.HasPrefix(path, systemRoot+"/")
+}
+
+// systemRemovable guards /Library: two levels down at least, never a shared
+// folder or one of Apple's own items, and reached without symlinks, so a
+// link can't steer an admin removal somewhere else.
+func systemRemovable(path string) bool {
+	rel := strings.TrimPrefix(path, systemRoot+"/")
+	if !strings.Contains(rel, "/") {
+		return false
+	}
+	for _, s := range systemShared {
+		if rel == s {
+			return false
+		}
+	}
+	if strings.HasPrefix(filepath.Base(path), "com.apple.") || strings.HasPrefix(rel, "Apple/") {
+		return false
+	}
+	parent := filepath.Dir(path)
+	real, err := filepath.EvalSymlinks(parent)
+	return err == nil && real == parent
+}
+
+// Permission bits for syscall.Access.
+const (
+	accessX = 0x1
+	accessW = 0x2
+)
+
+// needsAdmin reports whether moving path to the Trash needs the admin
+// password: its folder isn't writable by this account, a sticky folder
+// protects it, or it's a folder this account can't change.
+func needsAdmin(path string, info os.FileInfo) bool {
+	parent := filepath.Dir(path)
+	if syscall.Access(parent, accessW|accessX) != nil {
+		return true
+	}
+	if pst, err := os.Stat(parent); err == nil && pst.Mode()&os.ModeSticky != 0 {
+		if st, ok := info.Sys().(*syscall.Stat_t); ok && int(st.Uid) != os.Getuid() {
+			return true
+		}
+	}
+	// Moving a folder to another parent rewrites its "..", which needs
+	// write access to the folder itself.
+	if info.IsDir() && info.Mode()&os.ModeSymlink == 0 && syscall.Access(path, accessW) != nil {
+		return true
+	}
+	return false
+}
+
 func tilde(path, home string) string {
 	if home != "" && strings.HasPrefix(path, home+string(filepath.Separator)) {
 		return "~" + path[len(home):]
@@ -201,13 +288,17 @@ type RemoveResult struct {
 	Removed int      `json:"removed"`
 	Freed   int64    `json:"freed"`
 	Failed  []string `json:"failed"` // labels of items that could not be removed
+	// PasswordIssue says why system items weren't removed when the admin
+	// password didn't come through (see the Sudo* constants).
+	PasswordIssue string `json:"passwordIssue"`
 }
 
 // RemoveLeftovers clears the given paths, but only those present in allowed
 // (the result of an earlier Leftovers scan). Homebrew's cached downloads are
 // deleted outright since brew can fetch them again; everything else goes to
-// the Trash so it can be put back.
-func (c *Client) RemoveLeftovers(ctx context.Context, allowed []Leftover, paths []string) RemoveResult {
+// the Trash so it can be put back. System items this account can't move are
+// moved by one admin step, which asks for the password on behalf of reason.
+func (c *Client) RemoveLeftovers(ctx context.Context, allowed []Leftover, paths []string, reason string) RemoveResult {
 	res := RemoveResult{Failed: []string{}}
 	byPath := map[string]Leftover{}
 	for _, l := range allowed {
@@ -247,19 +338,136 @@ func (c *Client) RemoveLeftovers(ctx context.Context, allowed []Leftover, paths 
 		res.Freed += l.Size
 	}
 
-	if len(toTrash) > 0 {
-		trashed, err := moveToTrash(ctx, toTrash)
-		for _, l := range toTrash {
-			if trashed[l.Path] {
-				res.Removed++
-				res.Freed += l.Size
-			} else {
-				res.Failed = append(res.Failed, l.Label)
-			}
+	// Try as this account first; a system item that won't move goes to the
+	// admin step, so the password is only asked for when it's needed.
+	var plain, admin []Leftover
+	for _, l := range toTrash {
+		if info, err := os.Lstat(l.Path); err == nil && needsAdmin(l.Path, info) {
+			admin = append(admin, l)
+		} else {
+			plain = append(plain, l)
 		}
-		_ = err
+	}
+	trashed := map[string]bool{}
+	if len(plain) > 0 {
+		trashed, _ = moveToTrash(ctx, plain)
+	}
+	for _, l := range plain {
+		if !trashed[l.Path] && isSystemPath(l.Path) {
+			admin = append(admin, l)
+		}
+	}
+	if len(admin) > 0 {
+		moved, stuck, issue := c.trashAsAdmin(ctx, admin, reason)
+		for p := range moved {
+			trashed[p] = true
+		}
+		res.PasswordIssue = issue
+		for src, dest := range stuck {
+			// Out of the system folder, but the Trash refused it.
+			res.Failed = append(res.Failed, tilde(src, home)+" (moved to "+tilde(dest, home)+")")
+			trashed[src] = false
+			delete(byPath, src)
+		}
+	}
+	for _, l := range toTrash {
+		if _, staged := byPath[l.Path]; !staged {
+			continue
+		}
+		if trashed[l.Path] {
+			res.Removed++
+			res.Freed += l.Size
+		} else {
+			res.Failed = append(res.Failed, l.Label)
+		}
 	}
 	return res
+}
+
+// adminTrashScript runs as root. It moves each path into a private staging
+// folder under a free name and hands it back to the user, then prints the
+// old and new path on two lines. The app then moves the staged items to the
+// Trash as the user: macOS guards ~/.Trash itself, even from root. Paths
+// arrive as arguments, never as script text.
+const adminTrashScript = `t=$1; o=$2; shift 2
+for p in "$@"; do
+  b=${p##*/}; d="$t/$b"; n=2
+  while [ -e "$d" ] || [ -L "$d" ]; do d="$t/$b $n"; n=$((n+1)); done
+  if /bin/mv -n "$p" "$d"; then /usr/sbin/chown -R "$o" "$d"; printf '%s\n%s\n' "$p" "$d"; fi
+done`
+
+// adminTrashArgs are the /bin/sh arguments that run adminTrashScript.
+func adminTrashArgs(staging, owner string, paths []string) []string {
+	return append([]string{"-c", adminTrashScript, "sh", staging, owner}, paths...)
+}
+
+// parseStaged reads adminTrashScript's output: original path -> staged path.
+func parseStaged(out []byte) map[string]string {
+	staged := map[string]string{}
+	lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
+	for i := 0; i+1 < len(lines); i += 2 {
+		staged[lines[i]] = lines[i+1]
+	}
+	return staged
+}
+
+// trashAsAdmin moves system items to the Trash, asking for the password
+// with the macOS dialog: sudo moves them into a staging folder this account
+// owns, and the usual Trash call takes it from there. It returns the paths
+// that reached the Trash, those stuck in staging (old -> new path), and,
+// if the password didn't come through, why.
+func (c *Client) trashAsAdmin(ctx context.Context, items []Leftover, reason string) (map[string]bool, map[string]string, string) {
+	done, stuck := map[string]bool{}, map[string]string{}
+	base, err := os.UserCacheDir()
+	if err != nil {
+		return done, stuck, SudoUnavailable
+	}
+	staging := filepath.Join(base, "dev.vimukthid.brewctl", "removed", fmt.Sprint(time.Now().UnixNano()))
+	if err := os.MkdirAll(staging, 0o700); err != nil {
+		return done, stuck, SudoUnavailable
+	}
+	defer os.Remove(staging) // only if everything left it
+	helper, cleanup, err := newAskpass(reason, c.IconPath, askpassGiveUp)
+	if err != nil {
+		return done, stuck, SudoUnavailable
+	}
+	defer cleanup()
+
+	paths := make([]string, 0, len(items))
+	for _, l := range items {
+		paths = append(paths, l.Path)
+	}
+	args := append([]string{"-A", "--", "/bin/sh"}, adminTrashArgs(staging, fmt.Sprint(os.Getuid()), paths)...)
+	cmd := exec.CommandContext(ctx, "/usr/bin/sudo", args...)
+	cmd.Env = append(c.env(), "SUDO_ASKPASS="+helper)
+	cmd.Dir = os.TempDir()
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, _ := cmd.Output()
+	issue := ""
+	for _, line := range strings.Split(stderr.String(), "\n") {
+		if i := sudoIssue(line); i != "" && (issue == "" || i == SudoWrong) {
+			issue = i
+		}
+	}
+
+	staged := parseStaged(out)
+	if len(staged) == 0 {
+		return done, stuck, issue
+	}
+	var moved []Leftover
+	for _, dest := range staged {
+		moved = append(moved, Leftover{Path: dest})
+	}
+	trashed, _ := moveToTrash(ctx, moved)
+	for src, dest := range staged {
+		if trashed[dest] {
+			done[src] = true
+		} else {
+			stuck[src] = dest
+		}
+	}
+	return done, stuck, issue
 }
 
 // trashScript asks macOS to move each argument to the Trash and prints a JSON

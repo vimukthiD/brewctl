@@ -42,7 +42,23 @@ type Job struct {
 
 	args    []string
 	lenient bool // a non-zero exit still counts as done (e.g. doctor's warnings)
+	admin   bool // runs as `sudo brew`, asking for the admin password
+	reclaim string
+	after   *Job // runs only if this job finished successfully
 	cancel  context.CancelFunc
+}
+
+// Opts adjusts how a mutating job runs.
+type Opts struct {
+	// Admin runs the command as `sudo brew ...`, for services that run as
+	// root. The password is asked for through the macOS dialog.
+	Admin bool
+	// After is the ID of a job that must finish successfully first;
+	// otherwise this one is skipped.
+	After int
+	// Reclaim, with Admin, is a folder handed back to this account once the
+	// command succeeds. With no command it is the whole job.
+	Reclaim string
 }
 
 // JobOutput is a batch of new output lines for a job.
@@ -73,21 +89,45 @@ func NewRunner(c *Client, emit func(event string, data any)) *Runner {
 
 // Enqueue schedules `brew args...`.
 func (r *Runner) Enqueue(title string, mutates bool, args ...string) Job {
-	return r.enqueue(title, mutates, false, args)
+	return r.enqueue(title, mutates, false, Opts{}, args)
+}
+
+// EnqueueWith schedules a mutating `brew args...` with the given options.
+func (r *Runner) EnqueueWith(title string, o Opts, args ...string) Job {
+	return r.enqueue(title, true, false, o, args)
 }
 
 // EnqueueReport schedules a command whose output is the point: brew exiting
 // non-zero (as `doctor` does when it has warnings) is not a failure.
 func (r *Runner) EnqueueReport(title string, args ...string) Job {
-	return r.enqueue(title, false, true, args)
+	return r.enqueue(title, false, true, Opts{}, args)
 }
 
-func (r *Runner) enqueue(title string, mutates, lenient bool, args []string) Job {
+func (r *Runner) enqueue(title string, mutates, lenient bool, o Opts, args []string) Job {
 	r.mu.Lock()
+	command := "brew " + strings.Join(args, " ")
+	if o.Admin {
+		command = "sudo " + command
+	}
+	if o.Admin && o.Reclaim != "" {
+		chown := "sudo chown -R $USER " + o.Reclaim
+		if len(args) == 0 {
+			command = chown
+		} else {
+			command += " && " + chown
+		}
+	}
 	j := &Job{
-		ID: r.nextID, Title: title, Command: "brew " + strings.Join(args, " "),
+		ID: r.nextID, Title: title, Command: command,
 		Status: StatusQueued, Mutates: mutates, QueuedAt: time.Now().Unix(),
-		Output: []string{}, args: args, lenient: lenient,
+		Output: []string{}, args: args, lenient: lenient, admin: o.Admin, reclaim: o.Reclaim,
+	}
+	if o.After != 0 {
+		for _, prev := range r.jobs {
+			if prev.ID == o.After {
+				j.after = prev
+			}
+		}
 	}
 	r.nextID++
 	r.jobs = append(r.jobs, j)
@@ -120,7 +160,7 @@ func (r *Runner) trimLocked() {
 func (j *Job) meta() Job {
 	m := *j
 	m.Output = []string{}
-	m.args, m.cancel = nil, nil
+	m.args, m.cancel, m.after = nil, nil, nil
 	return m
 }
 
@@ -183,6 +223,16 @@ func (r *Runner) run(j *Job) {
 		r.mu.Unlock()
 		return
 	}
+	// Jobs run in order, so the prerequisite has already finished.
+	if j.after != nil && j.after.Status != StatusDone {
+		j.Status = StatusCancelled
+		j.EndedAt = time.Now().Unix()
+		j.Output = append(j.Output, "Skipped: “"+j.after.Title+"” didn't finish.")
+		meta := j.meta()
+		r.mu.Unlock()
+		r.emit("job:update", meta)
+		return
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	j.cancel = cancel
 	j.Status = StatusRunning
@@ -193,6 +243,9 @@ func (r *Runner) run(j *Job) {
 	r.emit("job:update", meta)
 
 	cmd := r.client.command(ctx, j.args...)
+	if j.admin {
+		cmd = r.client.sudoCommand(ctx, j.reclaim, j.args...)
+	}
 	if j.Mutates {
 		// Lets brew ask for the admin password through a macOS dialog.
 		if helper, cleanup, err := newAskpass(j.Title, r.client.IconPath, askpassGiveUp); err == nil {
