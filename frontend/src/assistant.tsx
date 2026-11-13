@@ -3,7 +3,7 @@ import { Events } from "@wailsio/runtime";
 import * as Assistant from "../bindings/dev.vimukthid/brewctl/assistantservice";
 import type { AssistantStatus } from "../bindings/dev.vimukthid/brewctl/models";
 import type { UsageSummary } from "../bindings/dev.vimukthid/brewctl/internal/assist/models";
-import { isActive, type Job, type Ref } from "./lib/api";
+import { isActive, type Job, type Ref, type Service } from "./lib/api";
 import { useBrew } from "./state";
 
 /** A change Claude suggests; it runs only when the user approves it. */
@@ -71,7 +71,20 @@ interface AssistantCtx {
   cost: number;
   /** Catalogue packages the conversation has come across, by name. */
   refs: Map<string, Ref>;
-  ask: (text: string) => Promise<void>;
+  /** Sends a message; context notes go to Claude but aren't shown. */
+  ask: (text: string, context?: string[]) => Promise<void>;
+  /**
+   * Opens the assistant from elsewhere in the app and asks about something.
+   * Without send (or while an answer is still coming) the text is left in
+   * the message box to finish.
+   */
+  askAbout: (text: string, opts?: { context?: string[]; send?: boolean }) => void;
+  draft: string;
+  setDraft: (s: string) => void;
+  /** Bumped when the message box should take focus. */
+  focusSeq: number;
+  /** A key is set, so asking can work. */
+  ready: boolean;
   stop: () => void;
   newChat: () => void;
   saveKey: (key: string) => Promise<void>;
@@ -119,6 +132,9 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const [refs, setRefs] = useState<Map<string, Ref>>(new Map());
   const [usage, setUsage] = useState<UsageSummary | null>(null);
   const [decisions, setDecisions] = useState<Record<string, Decision>>({});
+  const [draft, setDraft] = useState("");
+  const [focusSeq, setFocusSeq] = useState(0);
+  const pendingContext = useRef<string[]>([]);
   const seq = useRef(0);
   // Events can beat Ask's reply; hold them until the turn is on screen.
   const known = useRef(new Set<number>());
@@ -303,19 +319,22 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   // ---- Conversation ----------------------------------------------------------
 
   const ask = useCallback(
-    async (text: string) => {
+    async (text: string, context: string[] = []) => {
       const q = text.trim();
       if (!q || busy) return;
       const n = ++seq.current;
       const { out, reported } = notes();
+      // Context left by askAbout for a question finished in the message box.
+      const held = pendingContext.current;
+      pendingContext.current = [];
       setItems((list) => [...list, { role: "user", id: `u${n}`, text: q }]);
       try {
-        const turn = await Assistant.Ask(q, out);
+        const turn = await Assistant.Ask(q, [...held, ...context, ...out]);
         if (reported.length) setDecisions((all) => Object.fromEntries(Object.entries(all).map(([id, d]) => [id, reported.includes(id) ? { ...d, reported: true } : d])));
         known.current.add(turn);
-        const held = early.current.get(turn) ?? [];
+        const early_ = early.current.get(turn) ?? [];
         early.current.delete(turn);
-        const item = held.reduce<AssistantItem>(apply, { role: "assistant", id: `a${n}`, turn, text: "", steps: [], cards: [], state: "working" });
+        const item = early_.reduce<AssistantItem>(apply, { role: "assistant", id: `a${n}`, turn, text: "", steps: [], cards: [], state: "working" });
         setItems((list) => [...list, item]);
       } catch (e) {
         setItems((list) => [...list, { role: "assistant", id: `a${n}`, turn: -n, text: "", steps: [], cards: [], state: "error", error: errText(e) }]);
@@ -332,7 +351,26 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
     setCost(0);
     setRefs(new Map());
     setDecisions({});
+    pendingContext.current = [];
   }, []);
+
+  const askAbout = useCallback(
+    (text: string, opts: { context?: string[]; send?: boolean } = {}) => {
+      brew.select(null);
+      brew.showRemote(null);
+      brew.setView("assistant");
+      if (opts.send && !busy) {
+        void ask(text, opts.context);
+        return;
+      }
+      pendingContext.current = opts.context ?? [];
+      setDraft(text);
+      setFocusSeq((n) => n + 1);
+    },
+    [brew, busy, ask],
+  );
+
+  const ready = !!status?.hasKey;
 
   const saveKey = useCallback(
     async (key: string) => {
@@ -360,8 +398,8 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo(
-    () => ({ status, items, busy, cost, refs, ask, stop, newChat, saveKey, removeKey, setModel, usage, loadUsage, cardState, cardJobs, approve, decline }),
-    [status, items, busy, cost, refs, ask, stop, newChat, saveKey, removeKey, setModel, usage, loadUsage, cardState, cardJobs, approve, decline],
+    () => ({ status, items, busy, cost, refs, ask, askAbout, draft, setDraft, focusSeq, ready, stop, newChat, saveKey, removeKey, setModel, usage, loadUsage, cardState, cardJobs, approve, decline }),
+    [status, items, busy, cost, refs, ask, askAbout, draft, focusSeq, ready, stop, newChat, saveKey, removeKey, setModel, usage, loadUsage, cardState, cardJobs, approve, decline],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
@@ -371,3 +409,22 @@ export function useAssistant(): AssistantCtx {
   if (!c) throw new Error("useAssistant outside AssistantProvider");
   return c;
 }
+
+/** The question and context for asking why a job failed. */
+export function jobQuestion(j: Job) {
+  return {
+    text: `Why did “${j.title}” fail?`,
+    context: [`The user is asking about recent command #${j.id} “${j.title}” (${j.command}), which failed. Read its output with activity_output (id ${j.id}) before answering, and suggest a fix if there is one.`],
+  };
+}
+
+/** The question and context for asking about a service that stopped with an error. */
+export function serviceQuestion(s: Service) {
+  return {
+    text: `Why isn't the ${s.name} service working?`,
+    context: [
+      `The user is asking about the ${s.name} background service, which stopped with an error${s.exitCode != null ? ` (exit code ${s.exitCode})` : ""}. Check list_services and read service_log for ${s.name} before answering, and suggest a fix if there is one.`,
+    ],
+  };
+}
+

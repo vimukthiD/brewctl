@@ -3,6 +3,7 @@ import { CheckCircle2, CircleSlash, Clock, KeyRound, TerminalSquare, XCircle } f
 import { Button, CommandHint, Empty, Spinner } from "../components";
 import { duration, isActive, sudoMessage, timeAgo, type Job } from "../lib/api";
 import { useBrew } from "../state";
+import { AskButton, jobQuestion } from "./Assistant";
 
 function StatusIcon({ j }: { j: Job }) {
   switch (j.status) {
@@ -123,6 +124,11 @@ export function Activity() {
                         <p>{sudoMessage(j).body}</p>
                         <CommandHint command={j.command} />
                       </div>
+                    </div>
+                  )}
+                  {j.status === "failed" && (
+                    <div className="job-ask">
+                      <AskButton {...jobQuestion(j)} label="Ask Claude why it failed" />
                     </div>
                   )}
                   <Console lines={j.output} live={isActive(j)} />

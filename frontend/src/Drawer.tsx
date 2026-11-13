@@ -4,6 +4,7 @@ import { Button, CommandHint, JobProgress, PkgTags } from "./components";
 import { atLatest, caskVer, formatBytes, formatDate, onDisk, openURL, plural, timeAgo, updatedItself, vulnLabel } from "./lib/api";
 import { closure } from "./lib/graph";
 import { useBrew } from "./state";
+import { PackageAsk } from "./views/Assistant";
 
 function DepChips({ names, empty }: { names: string[]; empty: string }) {
   const { byShort, select } = useBrew();
@@ -58,6 +59,7 @@ export function Drawer() {
             <PkgTags p={p} />
           </div>
         </div>
+        <PackageAsk p={p} dependents={dependents} />
         <button type="button" className="icon-btn" aria-label="Close details" onClick={() => select(null)}>
           <X size={16} />
         </button>

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import {
   AlertCircle,
   ArrowUp,
@@ -22,8 +22,9 @@ import {
   X,
 } from "lucide-react";
 import { useAssistant, type ActionCard, type ChatItem, type ToolStep } from "../assistant";
+export { jobQuestion, serviceQuestion } from "../assistant";
 import { Button, JobProgress } from "../components";
-import { openURL } from "../lib/api";
+import { openURL, type Pkg } from "../lib/api";
 import { Markdown } from "../Markdown";
 import { useBrew } from "../state";
 
@@ -173,11 +174,16 @@ function AssistantMsg({ it }: { it: Extract<ChatItem, { role: "assistant" }> }) 
 }
 
 function Composer() {
-  const { ask, busy, stop } = useAssistant();
-  const [text, setText] = useState("");
+  const { ask, busy, stop, draft: text, setDraft: setText, focusSeq } = useAssistant();
   const ref = useRef<HTMLTextAreaElement>(null);
 
-  useEffect(() => ref.current?.focus(), []);
+  // Focus on arrival, and when another view leaves a question to finish.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  }, [focusSeq]);
   // Grow with the text, up to a limit.
   useLayoutEffect(() => {
     const el = ref.current;
@@ -377,7 +383,7 @@ const APPROVE_LABEL: Record<ActionCard["action"], string> = {
 };
 
 function ActionCardView({ c }: { c: ActionCard }) {
-  const { cardState, cardJobs, approve, decline } = useAssistant();
+  const { cardState, cardJobs, approve, decline, ask, busy } = useAssistant();
   const { byShort, pkgs, select, showRemote, showJob } = useBrew();
   const [starting, setStarting] = useState(false);
   const state = cardState(c);
@@ -459,10 +465,17 @@ function ActionCardView({ c }: { c: ActionCard }) {
       )}
       {(state === "done" || state === "failed" || state === "cancelled") && jobs.length > 0 && (
         <div className="ac-foot is-after">
-          <span className="ac-status">{state === "done" ? "Done. Claude will know when you next write." : state === "failed" ? "It didn't work. Ask Claude what went wrong." : "Stopped before it finished."}</span>
-          <button type="button" className="more" onClick={() => showJob((failed ?? jobs[jobs.length - 1]).id)}>
-            Show output
-          </button>
+          <span className="ac-status">{state === "done" ? "Done. Claude will know when you next write." : state === "failed" ? "It didn't work." : "Stopped before it finished."}</span>
+          <span className="ac-links">
+            <button type="button" className="more" onClick={() => showJob((failed ?? jobs[jobs.length - 1]).id)}>
+              Show output
+            </button>
+            {state === "failed" && (
+              <Button size="sm" icon={<Sparkles size={13} />} disabled={busy} onClick={() => void ask(`Why did “${c.title}” fail?`)}>
+                Ask why
+              </Button>
+            )}
+          </span>
         </div>
       )}
     </div>
@@ -613,6 +626,57 @@ function Tile({ label, cost, q }: { label: string; cost?: number; q?: number }) 
       <span>{label}</span>
       <strong>{cost === undefined ? "–" : cents(cost)}</strong>
       <em>{q === undefined ? "" : `${q} ${q === 1 ? "question" : "questions"}`}</em>
+    </div>
+  );
+}
+
+/** Opens the assistant and asks; hidden until a key is set. */
+export function AskButton({ text, context, label, variant = "default" }: { text: string; context?: string[]; label: string; variant?: "default" | "ghost" }) {
+  const { ready, askAbout } = useAssistant();
+  if (!ready) return null;
+  return (
+    <Button size="sm" variant={variant} icon={<Sparkles size={13} />} onClick={() => askAbout(text, { context, send: true })}>
+      {label}
+    </Button>
+  );
+}
+
+/** "Ask Claude" in the package panel: a few likely questions, or your own. */
+export function PackageAsk({ p, dependents }: { p: Pkg; dependents: string[] }) {
+  const { ready, askAbout } = useAssistant();
+  const { vulnBy } = useBrew();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const close = useCallback(() => setOpen(false), []);
+  useDismiss(ref, "pkg-ask", close);
+  if (!ready) return null;
+
+  const name = p.short;
+  const context = [`The user asked this from the details panel of the ${p.kind === "cask" ? "app" : "formula"} ${p.name} in Brewctl.`];
+  const questions = [
+    p.kind === "formula" && !p.onRequest ? `Why is ${name} installed?` : `What is ${name} for, and do I still need it?`,
+    p.outdated ? `What changed in ${name} ${p.latest}, and is it safe to upgrade?` : null,
+    vulnBy.has(name) ? `How serious are ${name}'s vulnerabilities, and what should I do?` : null,
+    dependents.length === 0 ? `Is it safe to remove ${name}?` : `What would break if ${name} were removed?`,
+  ].filter((q): q is string => !!q);
+
+  return (
+    <div className="pkg-ask">
+      <button type="button" className="pkg-ask-btn" data-popover-toggle="pkg-ask" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <Sparkles size={13} aria-hidden /> Ask Claude
+      </button>
+      {open && (
+        <div className="popover pkg-ask-menu" ref={ref} role="menu" aria-label={`Ask Claude about ${name}`}>
+          {questions.map((q) => (
+            <button key={q} type="button" role="menuitem" className="pkg-ask-item" onClick={() => askAbout(q, { context, send: true })}>
+              {q}
+            </button>
+          ))}
+          <button type="button" role="menuitem" className="pkg-ask-item is-other" onClick={() => askAbout(`About ${name}: `, { context })}>
+            Ask something else…
+          </button>
+        </div>
+      )}
     </div>
   );
 }

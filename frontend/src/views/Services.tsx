@@ -3,6 +3,7 @@ import { ChevronDown, Play, RotateCw, Server, Square } from "lucide-react";
 import { Button, CommandHint, Empty, JobProgress, Tag } from "../components";
 import { Brew, errorMessage, plural, type Service } from "../lib/api";
 import { useBrew } from "../state";
+import { AskButton, serviceQuestion } from "./Assistant";
 
 const IDEAS = ["postgresql", "redis", "nginx", "mysql", "ollama"];
 
@@ -71,6 +72,7 @@ function Row({ s }: { s: Service }) {
           <ChevronDown size={14} className="svc-chev" />
         </button>
         <div className="svc-actions">
+          {state.tone === "error" && !s.running && <AskButton {...serviceQuestion(s)} label="Ask why" variant="ghost" />}
           {s.running ? (
             <>
               <Button size="sm" icon={<RotateCw size={13} />} disabled={working} onClick={() => serviceAction(s.name, "restart")}>

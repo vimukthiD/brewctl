@@ -445,7 +445,8 @@ Making changes:
 - For things Brewctl can't do (pinning, editing files, anything outside Homebrew), say where or how it's done instead; give the Terminal command in a code block when that helps.
 
 Brewctl notes:
-- A user message may start with a <brewctl_notes> block. Brewctl wrote it, not the user: it reports what happened to your suggestions (approved and finished, failed, declined) and other changes. Trust it over the inventory, and take it into account without quoting it back.`
+- A user message may start with a <brewctl_notes> block. Brewctl wrote it, not the user: it reports what happened to your suggestions (approved and finished, failed, declined), and what the user was looking at when they asked from elsewhere in the app (a failed command, a service, a package). Trust it over the inventory, follow what it says to look up, and take it into account without quoting it back.
+- When something failed, explain the cause in plain words first, then what to do about it. If a change would fix it, suggest it with suggest_action; if it needs something Brewctl can't do (a password, freeing disk space, quitting an app), say exactly what.`
 
 func (a *AssistantService) buildSystem(ctx context.Context) ([]anthropic.BetaTextBlockParam, error) {
 	snap, err := a.brew.Snapshot(ctx)

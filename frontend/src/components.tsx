@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
 import { AlertTriangle, Check, Copy, Loader2, X } from "lucide-react";
 import { copyText, duration, vulnLabel, type Job, type Pkg } from "./lib/api";
+import { jobQuestion, useAssistant } from "./assistant";
 import { useBrew } from "./state";
 
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
@@ -172,7 +173,8 @@ export function ConfirmDialog() {
 }
 
 export function Toasts() {
-  const { toasts, dismissToast, showJob } = useBrew();
+  const { toasts, dismissToast, showJob, jobs } = useBrew();
+  const { ready, askAbout } = useAssistant();
   return (
     <div className="toasts" role="status" aria-live="polite">
       {toasts.map((t) => (
@@ -189,6 +191,22 @@ export function Toasts() {
               }}
             >
               View log
+            </button>
+          )}
+          {t.jobId != null && t.tone === "error" && ready && (
+            <button
+              type="button"
+              className="toast-link"
+              onClick={() => {
+                const j = jobs.find((x) => x.id === t.jobId);
+                if (j) {
+                  const q = jobQuestion(j);
+                  askAbout(q.text, { context: q.context, send: true });
+                }
+                dismissToast(t.id);
+              }}
+            >
+              Ask Claude
             </button>
           )}
           <button type="button" className="toast-x" aria-label="Dismiss" onClick={() => dismissToast(t.id)}>
