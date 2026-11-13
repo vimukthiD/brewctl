@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ArrowUpCircle, ExternalLink, Network, Pin, PinOff, Trash2, X } from "lucide-react";
 import { Button, CommandHint, JobProgress, PkgTags } from "./components";
-import { formatBytes, formatDate, openURL, plural, timeAgo, vulnLabel } from "./lib/api";
+import { atLatest, caskVer, formatBytes, formatDate, onDisk, openURL, plural, timeAgo, updatedItself, vulnLabel } from "./lib/api";
 import { closure } from "./lib/graph";
 import { useBrew } from "./state";
 
@@ -47,6 +47,7 @@ export function Drawer() {
   const isBusy = busy.has(p.key);
   const activeJob = jobFor(p.key);
   const flag = p.kind === "cask" ? "--cask " : "";
+  const selfUpdated = updatedItself(p);
 
   return (
     <aside className="drawer" aria-label={`${p.short} details`}>
@@ -75,7 +76,9 @@ export function Drawer() {
         <dl className="meta">
           <div>
             <dt>Installed</dt>
-            <dd className="ver">{p.version}</dd>
+            <dd className="ver" title={p.autoUpdates && p.appVersion && p.appVersion !== p.version ? `Homebrew's record says ${p.version}` : undefined}>
+              {onDisk(p)}
+            </dd>
           </div>
           <div>
             <dt>Latest</dt>
@@ -130,7 +133,17 @@ export function Drawer() {
         )}
 
         {p.outdated && p.pinned && <p className="note">Pinned at {p.version}. Unpin it to upgrade to {p.latest}.</p>}
-        {p.kind === "cask" && p.autoUpdates && <p className="note">This app updates itself, so Homebrew doesn't upgrade it.</p>}
+        {p.kind === "cask" && p.autoUpdates && (
+          <p className="note">
+            {selfUpdated
+              ? p.appVersion
+                ? `This app updates itself${atLatest(p) ? " and is up to date" : ""}. Homebrew still records ${caskVer(p.version)}, the version it installed, so it isn't counted as an update.`
+                : `This app updates itself, but Homebrew can't find it to check its version. Homebrew records ${caskVer(p.version)}.`
+              : p.outdated
+                ? `This app usually updates itself, but it's still on ${onDisk(p)}, so Homebrew will upgrade it.`
+                : "This app updates itself."}
+          </p>
+        )}
 
         {(nNeeds > 0 || nNeededBy > 0) && (
           <button type="button" className="svc-link" onClick={() => showMap(p.key)}>
@@ -176,6 +189,11 @@ export function Drawer() {
         {p.outdated && !p.pinned && (
           <Button variant="primary" icon={<ArrowUpCircle size={15} />} busy={isBusy} onClick={() => upgrade([p])}>
             Upgrade to {p.latest}
+          </Button>
+        )}
+        {selfUpdated && (
+          <Button icon={<ArrowUpCircle size={15} />} busy={isBusy} title={`Reinstall ${p.latest} through Homebrew so its record matches. Quit the app first.`} onClick={() => upgrade([p])}>
+            Upgrade with Homebrew
           </Button>
         )}
         {p.kind === "formula" && (

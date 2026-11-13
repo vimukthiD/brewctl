@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { ArrowUpCircle, CheckCircle2, ChevronRight, Stethoscope } from "lucide-react";
 import { Button, Spinner, useCountUp } from "../components";
-import { formatBytes, type Pkg } from "../lib/api";
+import { formatBytes, onDisk, type Pkg } from "../lib/api";
 import { useBrew } from "../state";
 
 function Stat({ label, value, hint, tone, onClick }: { label: string; value: string; hint: string; tone?: "accent" | "green"; onClick?: () => void }) {
@@ -147,7 +147,7 @@ export function Overview() {
                       <ArrowUpCircle size={15} className="mini-icon" />
                       <span className="mini-name">{p.short}</span>
                       <span className="ver">
-                        {p.version} <span className="arrow">→</span> <b>{p.latest}</b>
+                        {onDisk(p)} <span className="arrow">→</span> <b>{p.latest}</b>
                       </span>
                     </button>
                   </li>

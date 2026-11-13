@@ -1,6 +1,6 @@
 import { CheckCircle2, RefreshCw } from "lucide-react";
 import { Button, CommandHint, Empty, PkgTags } from "../components";
-import { isActive, timeAgo, type Pkg } from "../lib/api";
+import { atLatest, caskVer, isActive, onDisk, timeAgo, updatedItself, type Pkg } from "../lib/api";
 import { useBrew } from "../state";
 
 export function Updates() {
@@ -8,31 +8,67 @@ export function Updates() {
 
   const outdated = pkgs.filter((p) => p.outdated);
   const upgradable = outdated.filter((p) => !p.pinned);
-  // Apps that update themselves: brew deliberately leaves these alone.
-  const selfUpdating = pkgs.filter((p) => p.kind === "cask" && p.autoUpdates && !p.outdated && p.latest && p.latest !== p.version);
+  // Apps that update themselves and already have: Homebrew's record is old,
+  // but nothing needs doing, so they stay out of the update count.
+  const selfUpdated = pkgs.filter(updatedItself);
   const checking = jobs.some((j) => isActive(j) && j.command === "brew update");
   const anyBusy = upgradable.some((p) => busy.has(p.key));
 
-  const row = (p: Pkg, action: boolean) => (
-    <li key={p.key} className="up-row">
-      <button type="button" className="up-main" onClick={() => select(p.key)}>
-        <span className="up-title">
-          <span className="name">{p.short}</span>
-          <PkgTags p={{ ...p, outdated: false }} />
-        </span>
-        <span className="cell-desc">{p.desc}</span>
-      </button>
-      <span className="ver up-ver">
-        {p.version} <span className="arrow">→</span> <b>{p.latest}</b>
+  const main = (p: Pkg) => (
+    <button type="button" className="up-main" onClick={() => select(p.key)}>
+      <span className="up-title">
+        <span className="name">{p.short}</span>
+        <PkgTags p={{ ...p, outdated: false }} />
       </span>
-      {action &&
-        (p.pinned ? (
-          <span className="up-note">Pinned</span>
+      <span className="cell-desc">{p.desc}</span>
+    </button>
+  );
+
+  const row = (p: Pkg) => (
+    <li key={p.key} className="up-row">
+      {main(p)}
+      <span className="ver up-ver" title={p.autoUpdates && p.appVersion && p.appVersion !== p.version ? `Homebrew's record says ${p.version}` : undefined}>
+        {onDisk(p)} <span className="arrow">→</span> <b>{p.latest}</b>
+      </span>
+      {p.pinned ? (
+        <span className="up-note">Pinned</span>
+      ) : (
+        <Button size="sm" busy={busy.has(p.key)} onClick={() => upgrade([p])}>
+          Upgrade
+        </Button>
+      )}
+    </li>
+  );
+
+  const selfRow = (p: Pkg) => (
+    <li key={p.key} className="up-row">
+      {main(p)}
+      <span className="up-self">
+        {p.appVersion ? (
+          <>
+            <span className={`up-state ${atLatest(p) ? "is-ok" : ""}`}>
+              {atLatest(p) ? <CheckCircle2 size={13} aria-hidden /> : null}
+              {atLatest(p) ? "Up to date on its own" : "Updated on its own"}
+              <b className="ver">{p.appVersion}</b>
+            </span>
+            <span className="up-record">Homebrew's record: {caskVer(p.version)}</span>
+          </>
         ) : (
-          <Button size="sm" busy={busy.has(p.key)} onClick={() => upgrade([p])}>
-            Upgrade
-          </Button>
-        ))}
+          <>
+            <span className="up-state">Can't find the app to check</span>
+            <span className="up-record">Homebrew's record: {caskVer(p.version)}</span>
+          </>
+        )}
+      </span>
+      <Button
+        size="sm"
+        variant="ghost"
+        busy={busy.has(p.key)}
+        title={`Reinstall ${p.latest} through Homebrew so its record matches. Quit the app first.`}
+        onClick={() => upgrade([p])}
+      >
+        Upgrade with Homebrew anyway
+      </Button>
     </li>
   );
 
@@ -65,16 +101,20 @@ export function Updates() {
 
       {outdated.length > 0 && (
         <section className="card card-flush">
-          <ul className="up-list">{outdated.map((p) => row(p, true))}</ul>
+          <ul className="up-list">{outdated.map(row)}</ul>
         </section>
       )}
 
-      {selfUpdating.length > 0 && (
+      {selfUpdated.length > 0 && (
         <>
-          <h3 className="sub sub-page">Apps that update themselves</h3>
-          <p className="note">These have a newer version in Homebrew, but they manage their own updates, so Homebrew leaves them alone.</p>
+          <h3 className="sub sub-page">
+            Apps that update themselves <span className="sub-count">{selfUpdated.length}</span>
+          </h3>
+          <p className="note">
+            These kept themselves up to date, so there's nothing to do. Homebrew still lists the version it installed; upgrading with Homebrew reinstalls the app to bring its record in line.
+          </p>
           <section className="card card-flush">
-            <ul className="up-list">{selfUpdating.map((p) => row(p, false))}</ul>
+            <ul className="up-list">{selfUpdated.map(selfRow)}</ul>
           </section>
         </>
       )}

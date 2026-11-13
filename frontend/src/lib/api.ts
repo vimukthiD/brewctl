@@ -25,7 +25,22 @@ export function vulnLabel(f: Finding): string {
 /** Homebrew versions carry a rebuild suffix ("1.2.3_1") that scans leave off. */
 export const sameVersion = (installed: string, scanned: string) => installed.replace(/_\d+$/, "") === scanned.replace(/_\d+$/, "");
 
-export type ServiceVerb = "start" | "run" | "stop" | "restart";
+/** A cask version can carry a build after a comma ("4.38.1,8a2f"); people know the first part. */
+export const caskVer = (v: string) => v.split(",")[0];
+
+/** The version actually installed: a self-updating app's own bundle beats Homebrew's record. */
+export const onDisk = (p: Pkg) => (p.autoUpdates && p.appVersion) || p.version;
+
+/**
+ * A self-updating app Homebrew leaves alone: its record is behind the latest,
+ * but `brew outdated` already checked the bundle and found it isn't.
+ */
+export const updatedItself = (p: Pkg) => p.kind === "cask" && p.autoUpdates && !p.outdated && !p.pinned && !!p.latest && p.latest !== p.version;
+
+/** The app's bundle is on Homebrew's latest version. */
+export const atLatest = (p: Pkg) => !!p.appVersion && caskVer(p.appVersion) === caskVer(p.latest);
+
+export type ServiceVerb ="start" | "run" | "stop" | "restart";
 
 export interface Remote extends Omit<RawRemote, "deps" | "kind"> {
   kind: Kind;

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, PackageSearch } from "lucide-react";
 import { Empty, PkgTags, Spinner } from "../components";
-import { formatBytes, timeAgo, type Pkg } from "../lib/api";
+import { formatBytes, onDisk, timeAgo, type Pkg } from "../lib/api";
 import { useBrew } from "../state";
 
 type Filter = "all" | "requested" | "deps" | "casks" | "outdated";
@@ -130,7 +130,7 @@ export function Installed({ query }: { query: string }) {
                       </div>
                     </td>
                     <td className="col-ver">
-                      <span className="ver">{p.version}</span>
+                      <span className="ver">{onDisk(p)}</span>
                     </td>
                     <td className="col-size">
                       <span className="size-cell">

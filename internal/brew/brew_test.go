@@ -475,3 +475,62 @@ func TestSecurityStoreShared(t *testing.T) {
 		u()
 	}
 }
+
+func TestFillAppVersions(t *testing.T) {
+	dirA, dirB := t.TempDir(), t.TempDir()
+	write := func(dir, app, body string, binary bool) {
+		c := filepath.Join(dir, app, "Contents")
+		if err := os.MkdirAll(c, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		plist := filepath.Join(c, "Info.plist")
+		xml := `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict>` + body + `</dict></plist>`
+		if err := os.WriteFile(plist, []byte(xml), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if binary {
+			if out, err := exec.Command("/usr/bin/plutil", "-convert", "binary1", plist).CombinedOutput(); err != nil {
+				t.Fatalf("plutil: %v %s", err, out)
+			}
+		}
+	}
+	// Binary plist with both keys: the marketing version wins.
+	write(dirA, "Short.app", `<key>CFBundleShortVersionString</key><string>131.0.2</string><key>CFBundleVersion</key><string>13102</string>`, true)
+	// Only a build number, in the second folder.
+	write(dirB, "Build.app", `<key>CFBundleVersion</key><string>4567</string>`, false)
+
+	pkgs := []Package{
+		{Name: "short", Kind: "cask", AutoUpdates: true, Apps: []string{"Short.app"}},
+		{Name: "build", Kind: "cask", AutoUpdates: true, Apps: []string{"Missing.app", "Build.app"}},
+		{Name: "gone", Kind: "cask", AutoUpdates: true, Apps: []string{"Gone.app"}},
+		{Name: "managed", Kind: "cask", Apps: []string{"Short.app"}}, // brew upgrades it; not read
+		{Name: "tool", Kind: "formula", AutoUpdates: true, Apps: []string{"Short.app"}},
+	}
+	fillAppVersions(context.Background(), pkgs, []string{dirA, dirB})
+	want := []string{"131.0.2", "4567", "", "", ""}
+	for i, p := range pkgs {
+		if p.AppVersion != want[i] {
+			t.Errorf("%s: AppVersion = %q, want %q", p.Name, p.AppVersion, want[i])
+		}
+	}
+}
+
+func TestCaskReceiptTime(t *testing.T) {
+	room := t.TempDir()
+	meta := filepath.Join(room, "app", ".metadata")
+	if err := os.MkdirAll(meta, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(meta, "INSTALL_RECEIPT.json"), []byte(`{"time": 1794564484, "source": {}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := caskReceiptTime(room, "app"); got != 1794564484 {
+		t.Errorf("receipt time = %d", got)
+	}
+	if got := caskReceiptTime(room, "missing"); got != 0 {
+		t.Errorf("missing receipt = %d, want 0", got)
+	}
+	if got := caskReceiptTime("", "app"); got != 0 {
+		t.Errorf("no caskroom = %d, want 0", got)
+	}
+}

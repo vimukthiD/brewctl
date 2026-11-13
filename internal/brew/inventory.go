@@ -3,6 +3,7 @@ package brew
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -30,10 +31,13 @@ type Package struct {
 	Caveats     string   `json:"caveats"`
 	KegOnly     bool     `json:"kegOnly"`
 	AutoUpdates bool     `json:"autoUpdates"`
-	Deprecated  bool     `json:"deprecated"`
-	Disabled    bool     `json:"disabled"`
-	Apps        []string `json:"apps"` // cask .app artifacts
-	Zap         []string `json:"zap"`  // paths a cask lists as its own files
+	// AppVersion is what a self-updating app's bundle says it is, read from
+	// its Info.plist; empty when the app can't be found.
+	AppVersion string   `json:"appVersion"`
+	Deprecated bool     `json:"deprecated"`
+	Disabled   bool     `json:"disabled"`
+	Apps       []string `json:"apps"` // cask .app artifacts
+	Zap        []string `json:"zap"`  // paths a cask lists as its own files
 	// ServiceRoot means the formula's service must run as root, so it is
 	// started and stopped with `sudo brew services`.
 	ServiceRoot bool `json:"serviceRoot"`
@@ -222,6 +226,11 @@ func (c *Client) Inventory(ctx context.Context) (*Snapshot, error) {
 			Deps: []string{}, AllDeps: []string{}, Apps: caskApps(k.Artifacts),
 			Zap: caskZap(k.Artifacts),
 		}
+		// brew reports a cask's install time from a UTC folder name read back
+		// as local time, so it is off by the UTC offset; the receipt is exact.
+		if t := caskReceiptTime(c.Caskroom, k.Token); t > 0 {
+			p.InstalledAt = t
+		}
 		// Tools an app needs from Homebrew, given as one name or a list.
 		var many []string
 		var one string
@@ -247,10 +256,30 @@ func (c *Client) Inventory(ctx context.Context) (*Snapshot, error) {
 		snap.Packages = append(snap.Packages, p)
 	}
 
+	fillAppVersions(ctx, snap.Packages, appDirs())
+
 	sort.Slice(snap.Packages, func(i, j int) bool {
 		return strings.ToLower(snap.Packages[i].Name) < strings.ToLower(snap.Packages[j].Name)
 	})
 	return snap, nil
+}
+
+// caskReceiptTime is the install time recorded in a cask's receipt, or 0.
+func caskReceiptTime(caskroom, token string) int64 {
+	if caskroom == "" {
+		return 0
+	}
+	data, err := os.ReadFile(filepath.Join(caskroom, token, ".metadata", "INSTALL_RECEIPT.json"))
+	if err != nil {
+		return 0
+	}
+	var r struct {
+		Time int64 `json:"time"`
+	}
+	if json.Unmarshal(data, &r) != nil {
+		return 0
+	}
+	return r.Time
 }
 
 func shortName(full string) string {
