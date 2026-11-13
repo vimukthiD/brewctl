@@ -16,11 +16,13 @@ func main() {
 		runBackgroundCheck()
 		return
 	}
+	brewSvc := &BrewService{}
 	app := application.New(application.Options{
 		Name:        "Brewctl",
 		Description: "A control center for Homebrew",
 		Services: []application.Service{
-			application.NewService(&BrewService{}),
+			application.NewService(brewSvc),
+			application.NewService(&AssistantService{brew: brewSvc}),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),

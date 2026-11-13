@@ -32,7 +32,7 @@ import {
 } from "./lib/api";
 import { buildGraph, type DepGraph } from "./lib/graph";
 
-export type View = "overview" | "installed" | "discover" | "updates" | "security" | "services" | "cleanup" | "activity";
+export type View = "overview" | "installed" | "discover" | "updates" | "security" | "services" | "cleanup" | "activity" | "assistant";
 
 export interface ConfirmOptions {
   title: string;
@@ -66,7 +66,7 @@ interface Ctx {
   cleanup: CleanupPreview | null;
   /** Background services; null until first loaded. */
   services: Service[] | null;
-  serviceAction: (name: string, action: ServiceVerb) => Promise<void>;
+  serviceAction: (name: string, action: ServiceVerb) => Promise<Job | undefined>;
   /** The last vulnerability check; null until loaded. */
   security: SecurityState | null;
   /** Findings that still apply to what's installed right now. */
@@ -95,16 +95,18 @@ interface Ctx {
   /** A catalogue package shown in the side panel (not installed yet). */
   remote: Ref | null;
   showRemote: (r: Ref | null) => void;
-  install: (r: Ref) => Promise<void>;
-  upgrade: (pkgs: Pkg[]) => Promise<void>;
+  install: (r: Ref) => Promise<Job | undefined>;
+  upgrade: (pkgs: Pkg[]) => Promise<Job[] | undefined>;
   /** Uninstalls p, then clears the given leftover paths once that succeeds. */
-  uninstall: (p: Pkg, leftovers?: string[]) => Promise<void>;
+  uninstall: (p: Pkg, leftovers?: string[]) => Promise<Job | undefined>;
   uninstallTarget: Pkg | null;
   requestUninstall: (p: Pkg | null) => void;
+  /** Calls back when an uninstall of this package key starts; returns an unsubscribe. */
+  watchUninstall: (key: string, cb: (job: Job) => void) => () => void;
   setPinned: (p: Pkg, pinned: boolean) => Promise<void>;
   updateIndex: () => Promise<void>;
-  autoremove: () => Promise<void>;
-  cleanupNow: (deep: boolean) => Promise<void>;
+  autoremove: () => Promise<Job | undefined>;
+  cleanupNow: (deep: boolean) => Promise<Job | undefined>;
   doctor: () => Promise<void>;
   cancelJob: (id: number) => void;
 
@@ -149,6 +151,7 @@ export function BrewProvider({ children }: { children: ReactNode }) {
   const [mapKey, setMapKey] = useState<string | null>(null);
   const [uninstallTarget, setUninstallTarget] = useState<Pkg | null>(null);
   const pendingLeftovers = useRef<Record<number, { name: string; kind: string; paths: string[] }>>({});
+  const uninstallWatchers = useRef(new Map<string, (job: Job) => void>());
 
   const refreshSeq = useRef(0);
   const jobsRef = useRef<Job[]>([]);
@@ -389,11 +392,12 @@ export function BrewProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const guard = useCallback(
-    async (fn: () => Promise<void>) => {
+    async <T,>(fn: () => Promise<T>): Promise<T | undefined> => {
       try {
-        await fn();
+        return await fn();
       } catch (e) {
         toast({ tone: "error", text: errorMessage(e) });
+        return undefined;
       }
     },
     [toast],
@@ -418,6 +422,7 @@ export function BrewProvider({ children }: { children: ReactNode }) {
       guard(async () => {
         const job = await Brew.Install({ name: r.name, kind: r.kind });
         track(job, [refKey(r)]);
+        return job ? toJob(job) : undefined;
       }),
     [guard, track],
   );
@@ -427,6 +432,7 @@ export function BrewProvider({ children }: { children: ReactNode }) {
       guard(async () => {
         const job = await Brew.ServiceAction(name, action);
         track(job, [`service:${name}`]);
+        return job ? toJob(job) : undefined;
       }),
     [guard, track],
   );
@@ -437,13 +443,14 @@ export function BrewProvider({ children }: { children: ReactNode }) {
   const upgrade = useCallback(
     (list: Pkg[]) =>
       guard(async () => {
-        if (!list.length) return;
+        if (!list.length) return [];
         const js = await Brew.Upgrade(list.map((p) => ({ name: p.name, kind: p.kind })));
         for (const kind of ["formula", "cask"] as const) {
           const keys = list.filter((p) => p.kind === kind).map((p) => p.key);
           const job = (js ?? []).find((j) => j.command.includes(kind === "cask" ? "--cask" : "--formula"));
           track(job, keys);
         }
+        return (js ?? []).map(toJob);
       }),
     [guard, track],
   );
@@ -454,6 +461,10 @@ export function BrewProvider({ children }: { children: ReactNode }) {
         const job = await Brew.Uninstall({ name: p.name, kind: p.kind });
         if (job && leftovers.length) pendingLeftovers.current[job.id] = { name: p.name, kind: p.kind, paths: leftovers };
         track(job, [p.key]);
+        if (!job) return undefined;
+        const j = toJob(job);
+        uninstallWatchers.current.get(p.key)?.(j);
+        return j;
       }),
     [guard, track],
   );
@@ -468,11 +479,28 @@ export function BrewProvider({ children }: { children: ReactNode }) {
   );
 
   const updateIndex = useCallback(() => guard(async () => void (await Brew.UpdateIndex())), [guard]);
-  const autoremove = useCallback(() => guard(async () => void (await Brew.Autoremove())), [guard]);
-  const cleanupNow = useCallback(
-    (deep: boolean) => guard(async () => void (await Brew.Cleanup(deep))),
+  const autoremove = useCallback(
+    () =>
+      guard(async () => {
+        const job = await Brew.Autoremove();
+        return job ? toJob(job) : undefined;
+      }),
     [guard],
   );
+  const cleanupNow = useCallback(
+    (deep: boolean) =>
+      guard(async () => {
+        const job = await Brew.Cleanup(deep);
+        return job ? toJob(job) : undefined;
+      }),
+    [guard],
+  );
+  const watchUninstall = useCallback((key: string, cb: (job: Job) => void) => {
+    uninstallWatchers.current.set(key, cb);
+    return () => {
+      if (uninstallWatchers.current.get(key) === cb) uninstallWatchers.current.delete(key);
+    };
+  }, []);
   const showJob = useCallback((id: number) => {
     setFocusJob(id);
     setSelectedKey(null);
@@ -545,6 +573,7 @@ export function BrewProvider({ children }: { children: ReactNode }) {
     uninstall,
     uninstallTarget,
     requestUninstall: setUninstallTarget,
+    watchUninstall,
     setPinned,
     updateIndex,
     autoremove,

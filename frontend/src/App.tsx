@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowUpCircle, Beer, Compass, LayoutDashboard, Server, Package, RefreshCw, Search, ShieldAlert, Sparkles, TerminalSquare, X } from "lucide-react";
+import { ArrowUpCircle, Beer, Compass, LayoutDashboard, MessagesSquare, Server, Package, RefreshCw, Search, ShieldAlert, Sparkles, TerminalSquare, X } from "lucide-react";
 import { Button, CommandHint, ConfirmDialog, Spinner, Toasts } from "./components";
 import { DepMap } from "./DepMap";
 import { Drawer } from "./Drawer";
@@ -7,6 +7,7 @@ import { UninstallDialog } from "./UninstallDialog";
 import { isActive, openURL, timeAgo } from "./lib/api";
 import { useBrew, type View } from "./state";
 import { Activity } from "./views/Activity";
+import { AssistantView } from "./views/Assistant";
 import { Cleanup } from "./views/Cleanup";
 import { Discover } from "./views/Discover";
 import { Security } from "./views/Security";
@@ -25,6 +26,7 @@ const NAV: { id: View; label: string; icon: typeof Package }[] = [
   { id: "services", label: "Services", icon: Server },
   { id: "cleanup", label: "Cleanup", icon: Sparkles },
   { id: "activity", label: "Activity", icon: TerminalSquare },
+  { id: "assistant", label: "Assistant", icon: MessagesSquare },
 ];
 
 const TITLES: Record<View, string> = {
@@ -36,6 +38,7 @@ const TITLES: Record<View, string> = {
   services: "Services",
   cleanup: "Cleanup",
   activity: "Activity",
+  assistant: "Assistant",
 };
 
 export default function App() {
@@ -65,7 +68,7 @@ export default function App() {
       } else if (k === "r") {
         e.preventDefault();
         b.refresh();
-      } else if (k >= "1" && k <= "8") {
+      } else if (k >= "1" && k <= "9") {
         e.preventDefault();
         b.setView(NAV[Number(k) - 1].id);
       }
@@ -235,6 +238,7 @@ export default function App() {
               )}
               {b.view === "cleanup" && <Cleanup />}
               {b.view === "activity" && <Activity />}
+              {b.view === "assistant" && <AssistantView />}
             </>
           )}
         </div>
