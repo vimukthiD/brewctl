@@ -137,6 +137,27 @@ tasks:
       - task: package
     cmds:
       - task: create:dmg
+      # The .dmg holds the app. A loose bin/brewctl.app would show up in
+      # Spotlight and Launchpad next to the installed copy.
+      - task: remove:app:bundle
+
+  install:
+    summary: Builds the app, installs it as /Applications/Brewctl.app, and removes the build copy
+    platforms: [darwin]
+    deps:
+      - task: package
+    cmds:
+      - test -n "{{.INSTALL_PATH}}" && rm -rf -- "{{.INSTALL_PATH}}"
+      - ditto "{{.BIN_DIR}}/{{.APP_NAME}}.app" "{{.INSTALL_PATH}}"
+      - task: remove:app:bundle
+    vars:
+      INSTALL_PATH: '{{.INSTALL_PATH | default "/Applications/Brewctl.app"}}'
+
+  remove:app:bundle:
+    summary: Removes the build copy of the app bundle
+    internal: true
+    cmds:
+      - test -n "{{.BIN_DIR}}" && test -n "{{.APP_NAME}}" && rm -rf -- "{{.BIN_DIR}}/{{.APP_NAME}}.app"
 
   create:dmg:
     summary: Creates a configurable `.dmg` from the `.app` bundle
@@ -192,6 +213,8 @@ tasks:
 
   run:
     cmds:
+      # Remove the dev bundle when the app quits so it doesn't linger in Spotlight.
+      - defer: test -n "{{.BIN_DIR}}" && test -n "{{.APP_NAME}}" && rm -rf -- "{{.BIN_DIR}}/{{.APP_NAME}}.dev.app"
       - wails3 tool prepare-macos-output --dir "{{.BIN_DIR}}"
       - test -n "{{.BIN_DIR}}" && test -n "{{.APP_NAME}}" && rm -rf -- "{{.BIN_DIR}}/{{.APP_NAME}}.dev.app"
       - mkdir -p "{{.BIN_DIR}}/{{.APP_NAME}}.dev.app/Contents/MacOS"

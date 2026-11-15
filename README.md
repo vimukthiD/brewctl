@@ -68,9 +68,14 @@ go test ./...
 ## Package
 
 ```sh
+wails3 task install              # build and install /Applications/Brewctl.app
 wails3 package                  # bin/brewctl.app (ad-hoc signed)
 wails3 task darwin:package:dmg  # bin/brewctl.dmg
 ```
+
+`install` and the `.dmg` task delete `bin/brewctl.app` when they finish, so
+Spotlight and Launchpad show only the installed app. A bundle left by
+`wails3 package` shows up there as a second Brewctl until you delete it.
 
 The bundle identifier is `dev.vimukthid.brewctl`. Builds are ad-hoc signed,
 which is fine on the Mac that built them. To hand the app to someone else it

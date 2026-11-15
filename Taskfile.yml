@@ -25,6 +25,11 @@ tasks:
     cmds:
       - task: "{{.GOOS}}:package"
 
+  install:
+    summary: Builds the application and installs it in /Applications
+    cmds:
+      - task: "{{.GOOS}}:install"
+
   run:
     summary: Runs the application
     cmds:
