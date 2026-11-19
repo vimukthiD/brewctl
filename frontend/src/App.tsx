@@ -51,7 +51,7 @@ export default function App() {
   const searchRef = useRef<HTMLInputElement>(null);
   const [, setTick] = useState(0);
 
-  // Keep "updated 3 minutes ago" honest.
+  // Keep "read 3 minutes ago" honest.
   useEffect(() => {
     const t = window.setInterval(() => setTick((n) => n + 1), 30000);
     return () => window.clearInterval(t);
@@ -176,7 +176,9 @@ export default function App() {
               )}
             </label>
           )}
-          {b.fetchedAt && !b.refreshing && <span className="stamp">Updated {timeAgo(b.fetchedAt)}</span>}
+          {b.fetchedAt && !b.refreshing && <span className="stamp" title="When Brewctl last read what's installed from Homebrew">
+              Read {timeAgo(b.fetchedAt)}
+            </span>}
           <button type="button" className="icon-btn" aria-label="Refresh" title="Refresh  ⌘R" disabled={b.refreshing} onClick={() => b.refresh()}>
             <RefreshCw size={15} className={b.refreshing ? "spin" : ""} />
           </button>

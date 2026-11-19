@@ -18,12 +18,13 @@ import (
 
 // Client is a located Homebrew installation.
 type Client struct {
-	Path     string `json:"path"`
-	Prefix   string `json:"prefix"`
-	Cellar   string `json:"cellar"`
-	Caskroom string `json:"caskroom"`
-	Cache    string `json:"cache"`
-	Version  string `json:"version"`
+	Path       string `json:"path"`
+	Prefix     string `json:"prefix"`
+	Repository string `json:"repository"` // Homebrew's own git checkout
+	Cellar     string `json:"cellar"`
+	Caskroom   string `json:"caskroom"`
+	Cache      string `json:"cache"`
+	Version    string `json:"version"`
 	// IconPath is an .icns shown in the password dialog; empty for a generic one.
 	IconPath string `json:"-"`
 }
@@ -63,8 +64,9 @@ func Detect(ctx context.Context) (*Client, error) {
 			*dst = strings.TrimSpace(string(out))
 		}
 	}
-	wg.Add(5)
+	wg.Add(6)
 	go get(&c.Prefix, "--prefix")
+	go get(&c.Repository, "--repository")
 	go get(&c.Cellar, "--cellar")
 	go get(&c.Caskroom, "--caskroom")
 	go get(&c.Cache, "--cache")
@@ -73,6 +75,13 @@ func Detect(ctx context.Context) (*Client, error) {
 
 	if c.Prefix == "" {
 		c.Prefix = filepath.Dir(filepath.Dir(path))
+	}
+	if c.Repository == "" {
+		// Apple Silicon keeps the checkout at the prefix, Intel one level in.
+		c.Repository = c.Prefix
+		if _, err := os.Stat(filepath.Join(c.Prefix, ".git")); err != nil {
+			c.Repository = filepath.Join(c.Prefix, "Homebrew")
+		}
 	}
 	if c.Cellar == "" {
 		c.Cellar = filepath.Join(c.Prefix, "Cellar")

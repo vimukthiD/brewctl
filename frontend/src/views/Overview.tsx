@@ -1,7 +1,7 @@
 import { useMemo } from "react";
-import { ArrowUpCircle, CheckCircle2, ChevronRight, Stethoscope } from "lucide-react";
-import { Button, Spinner, useCountUp } from "../components";
-import { formatBytes, onDisk, type Pkg } from "../lib/api";
+import { ArrowUpCircle, CheckCircle2, ChevronRight, Stethoscope, Zap } from "lucide-react";
+import { Button, ChainProgress, Spinner, useCountUp } from "../components";
+import { formatBytes, onDisk, timeAgo, type Pkg } from "../lib/api";
 import { useBrew } from "../state";
 
 function Stat({ label, value, hint, tone, onClick }: { label: string; value: string; hint: string; tone?: "accent" | "green"; onClick?: () => void }) {
@@ -20,7 +20,7 @@ function CountStat(props: { label: string; n: number; hint: string; tone?: "acce
 }
 
 export function Overview() {
-  const { pkgs, sizes, cacheSize, cleanup, setView, select, upgrade, busy, doctor, loading, security, vulnFindings } = useBrew();
+  const { pkgs, sizes, cacheSize, cleanup, setView, select, upgrade, busy, doctor, loading, security, vulnFindings, status, updateEverything, updatingEverything, everything, prefs } = useBrew();
 
   const groups = useMemo(() => {
     const requested = pkgs.filter((p) => p.kind === "formula" && p.onRequest);
@@ -125,18 +125,34 @@ export function Overview() {
           <section className="card">
             <header className="card-head">
               <h2>Updates</h2>
-              {nUpdates > 0 && (
-                <Button size="sm" variant="primary" busy={anyBusy} onClick={() => upgrade(groups.outdated)}>
-                  Upgrade all
+              <div className="card-head-actions">
+                <Button
+                  size="sm"
+                  icon={<Zap size={13} />}
+                  busy={updatingEverything}
+                  title={`Runs brew update, then brew upgrade${prefs?.cleanupAfterUpdate ?? true ? ", then brew cleanup" : ""}`}
+                  onClick={updateEverything}
+                >
+                  Update everything
                 </Button>
-              )}
+                {nUpdates > 0 && (
+                  <Button size="sm" variant="primary" busy={anyBusy && !updatingEverything} disabled={updatingEverything} onClick={() => upgrade(groups.outdated)}>
+                    Upgrade all
+                  </Button>
+                )}
+              </div>
             </header>
+            {updatingEverything && (
+              <div className="card-progress">
+                <ChainProgress jobs={everything} />
+              </div>
+            )}
             {nUpdates === 0 ? (
               <div className="allclear">
                 <CheckCircle2 size={18} />
                 <div>
                   <strong>You're up to date</strong>
-                  <span>Check again from the Updates tab.</span>
+                  <span>{status?.listsUpdatedAt ? `Package lists checked ${timeAgo(status.listsUpdatedAt)}.` : "Check again from the Updates tab."}</span>
                 </div>
               </div>
             ) : (

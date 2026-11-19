@@ -11,10 +11,10 @@ import type {
   Vuln,
   Remote as RawRemote,
 } from "../../bindings/dev.vimukthid/brewctl/internal/brew/models";
-import type { Status, SecurityState, UninstallPlan } from "../../bindings/dev.vimukthid/brewctl/models";
+import type { Status, SecurityState, UninstallPlan, Preferences } from "../../bindings/dev.vimukthid/brewctl/models";
 
 export { Brew };
-export type { Status, Leftover, SearchResult, Service, Finding, Vuln, SecurityState, UninstallPlan };
+export type { Status, Leftover, SearchResult, Service, Finding, Vuln, SecurityState, UninstallPlan, Preferences };
 
 /** "3 known vulnerabilities", for a finding. */
 export function vulnLabel(f: Finding): string {
@@ -123,6 +123,9 @@ export function sudoMessage(j: Job): { title: string; body: string } {
 }
 
 export const isActive = (j: Job) => j.status === "queued" || j.status === "running";
+
+/** A `brew update` Brewctl started on its own because the lists were getting old. */
+export const isAutomatic = (j: { title: string }) => j.title.endsWith("(automatic)");
 
 export function openURL(url: string) {
   if (!/^https?:\/\//i.test(url)) return;

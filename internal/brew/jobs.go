@@ -34,6 +34,7 @@ type Job struct {
 	Status    string   `json:"status"`
 	NeedsSudo bool     `json:"needsSudo"`
 	SudoIssue string   `json:"sudoIssue"` // why sudo failed, see the Sudo* constants
+	Offline   bool     `json:"offline"`   // its output says the network couldn't be reached
 	Mutates   bool     `json:"mutates"`
 	QueuedAt  int64    `json:"queuedAt"`
 	StartedAt int64    `json:"startedAt"`
@@ -378,6 +379,9 @@ func (r *Runner) pump(j *Job, rd io.Reader) {
 func (r *Runner) appendLines(j *Job, lines []string) {
 	r.mu.Lock()
 	for _, l := range lines {
+		if !j.Offline && networkIssue(l) {
+			j.Offline = true
+		}
 		if issue := sudoIssue(l); issue != "" {
 			j.NeedsSudo = true
 			// A wrong password is followed by "no password was provided" if

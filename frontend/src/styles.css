@@ -625,6 +625,17 @@ ul {
   margin-top: -2px;
 }
 
+.card-head-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.card-progress {
+  margin-bottom: 12px;
+}
+
 .card-meta {
   color: var(--text-2);
   font-variant-numeric: tabular-nums;
@@ -1196,6 +1207,84 @@ button.rank-row:hover {
 
 .bar-text span {
   color: var(--text-3);
+  font-size: 12px;
+}
+
+/* When the package lists were checked, and when Brewctl last read them. */
+.fresh {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 6px;
+  min-height: 18px;
+}
+
+.fresh-sep {
+  opacity: 0.7;
+}
+
+.bar-text .fresh.is-checking {
+  color: var(--accent-text);
+  gap: 6px;
+}
+
+/* A count inside a button, like "Upgrade all 3". */
+.btn-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  margin-left: 3px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: 11px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  vertical-align: 1px;
+}
+
+.everything .card-head {
+  align-items: center;
+}
+
+.everything .card-sub {
+  max-width: 560px;
+}
+
+.everything-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: none;
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-2);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.check:hover {
+  color: var(--text);
+}
+
+.check input {
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+.check:has(input:disabled) {
+  opacity: 0.55;
+}
+
+.everything-failed {
+  margin-bottom: 10px;
+  color: var(--red);
   font-size: 12px;
 }
 
@@ -2224,6 +2313,52 @@ button.rank-row:hover {
   background: var(--accent);
 }
 
+.progress-steps .is-failed {
+  background: var(--red);
+}
+
+/* Progress inside a card rather than along a panel's bottom edge. */
+.progress-inset {
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius: 9px;
+}
+
+.chain-steps {
+  display: flex;
+  gap: 4px;
+  margin: -2px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chain-steps li {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: var(--text-3);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.chain-steps .is-running {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.chain-steps .is-done {
+  color: var(--text-2);
+}
+
+.chain-steps .is-done svg {
+  color: var(--green);
+}
+
+.chain-steps .is-failed {
+  color: var(--red);
+}
+
 .progress-steps .is-now::after {
   content: "";
   position: absolute;
@@ -2610,6 +2745,14 @@ button.rank-row:hover {
 
 .switch:hover {
   color: var(--text);
+}
+
+.switch:disabled {
+  opacity: 0.5;
+}
+
+.switch:disabled:hover {
+  color: var(--text-2);
 }
 
 .switch-track {

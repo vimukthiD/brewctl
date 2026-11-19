@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ChevronDown, ExternalLink, ShieldAlert, ShieldCheck } from "lucide-react";
-import { Button, CommandHint, Empty, Tag } from "../components";
+import { Button, CommandHint, Empty, Switch, Tag } from "../components";
 import { Brew, openURL, plural, timeAgo, type Finding, type Vuln } from "../lib/api";
 import { useBrew } from "../state";
 
@@ -139,12 +139,7 @@ function MonitorSwitch() {
   const { security, setSecurityMonitor } = useBrew();
   const on = !!security?.monitor;
   return (
-    <button type="button" role="switch" aria-checked={on} className={`switch ${on ? "is-on" : ""}`} title="Checks once a day, even when Brewctl is closed, and notifies you about new vulnerabilities" onClick={() => setSecurityMonitor(!on)}>
-      <span className="switch-track" aria-hidden>
-        <span className="switch-knob" />
-      </span>
-      <span>Check daily</span>
-    </button>
+    <Switch on={on} onChange={setSecurityMonitor} label="Check daily" title="Checks once a day, even when Brewctl is closed, and notifies you about new vulnerabilities" />
   );
 }
 

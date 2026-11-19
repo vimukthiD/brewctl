@@ -25,6 +25,18 @@ export function Button({ variant = "default", size = "md", busy, icon, children,
   );
 }
 
+/** An on/off switch with its label, as used for settings that take effect at once. */
+export function Switch({ on, onChange, label, title, disabled }: { on: boolean; onChange: (on: boolean) => void; label: string; title?: string; disabled?: boolean }) {
+  return (
+    <button type="button" role="switch" aria-checked={on} className={`switch ${on ? "is-on" : ""}`} title={title} disabled={disabled} onClick={() => onChange(!on)}>
+      <span className="switch-track" aria-hidden>
+        <span className="switch-knob" />
+      </span>
+      <span>{label}</span>
+    </button>
+  );
+}
+
 export function Tag({ tone = "neutral", children, title }: { tone?: "neutral" | "accent" | "green" | "red" | "blue"; children: ReactNode; title?: string }) {
   return (
     <span className={`tag tag-${tone}`} title={title}>
@@ -276,6 +288,71 @@ export function JobProgress({ job }: { job: Job }) {
         </button>
         <button type="button" className="more more-quiet" onClick={() => cancelJob(job.id)}>
           {queued ? "Remove from queue" : "Stop"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** What each step of "Update everything" is doing while it runs. */
+const CHAIN_STEPS: Record<string, { name: string; doing: string }> = {
+  "brew update": { name: "Check for updates", doing: "Checking for updates" },
+  "brew upgrade": { name: "Upgrade", doing: "Upgrading packages" },
+  "brew cleanup": { name: "Clean up", doing: "Cleaning up" },
+};
+
+const chainStep = (j: Job) => CHAIN_STEPS[j.command] ?? { name: j.title, doing: j.title };
+
+/**
+ * Live progress for a chain of jobs that run one after another, like
+ * "Update everything": one segment per step, the step now running, and its
+ * latest line of output. Stopping the current step skips the rest.
+ */
+export function ChainProgress({ jobs }: { jobs: Job[] }) {
+  const { showJob, cancelJob } = useBrew();
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const t = window.setInterval(() => setTick((n) => n + 1), 1000);
+    return () => window.clearInterval(t);
+  }, []);
+
+  const current = jobs.find((j) => j.status === "running") ?? jobs.find((j) => j.status === "queued");
+  if (!current) return null;
+  const at = jobs.indexOf(current);
+  const waiting = current.status === "queued";
+  const last = current.output[current.output.length - 1];
+  const started = jobs.find((j) => j.startedAt);
+  const elapsed = started ? duration({ ...started, endedAt: 0 }) : "";
+
+  return (
+    <div className="progress progress-inset" role="status" aria-live="polite">
+      <div className="progress-head">
+        <strong>{waiting ? "Waiting for another job to finish" : `${chainStep(current).doing}…`}</strong>
+        <span className="progress-time">
+          Step {at + 1} of {jobs.length}
+          {elapsed && ` · ${elapsed}`}
+        </span>
+      </div>
+      <div className="progress-steps" aria-hidden>
+        {jobs.map((j) => (
+          <span key={j.id} className={j.status === "done" ? "is-done" : j.status === "running" ? "is-now" : j.status === "failed" ? "is-failed" : ""} />
+        ))}
+      </div>
+      <ol className="chain-steps">
+        {jobs.map((j) => (
+          <li key={j.id} className={`is-${j.status}`}>
+            {j.status === "done" ? <Check size={11} aria-label="Done" /> : j.status === "failed" ? <X size={11} aria-label="Failed" /> : null}
+            {chainStep(j).name}
+          </li>
+        ))}
+      </ol>
+      <div className="progress-line">{waiting ? "Homebrew runs one change at a time." : last ?? "Starting…"}</div>
+      <div className="progress-actions">
+        <button type="button" className="more" onClick={() => showJob(current.id)}>
+          Show full output
+        </button>
+        <button type="button" className="more more-quiet" onClick={() => cancelJob(current.id)} title="Stops this step and skips the rest">
+          Stop
         </button>
       </div>
     </div>

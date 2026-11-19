@@ -14,6 +14,7 @@ import {
   errorMessage,
   formatBytes,
   isActive,
+  isAutomatic,
   plural,
   refKey,
   toCleanup,
@@ -25,6 +26,7 @@ import {
   type SecurityState,
   type Job,
   type Pkg,
+  type Preferences,
   type Ref,
   type Service,
   type ServiceVerb,
@@ -105,6 +107,16 @@ interface Ctx {
   watchUninstall: (key: string, cb: (job: Job) => void) => () => void;
   setPinned: (p: Pkg, pinned: boolean) => Promise<void>;
   updateIndex: () => Promise<void>;
+  /** `brew update`, then `brew upgrade`, then (if the preference is on) `brew cleanup`. */
+  updateEverything: () => Promise<Job[] | undefined>;
+  /** The latest "Update everything" run's jobs, in order; empty if none this session. */
+  everything: Job[];
+  /** An "Update everything" run is queued or running. */
+  updatingEverything: boolean;
+  /** Remembered settings; null until loaded. */
+  prefs: Preferences | null;
+  setCleanupAfterUpdate: (on: boolean) => Promise<void>;
+  setAutoUpdate: (on: boolean) => Promise<void>;
   autoremove: () => Promise<Job | undefined>;
   cleanupNow: (deep: boolean) => Promise<Job | undefined>;
   doctor: () => Promise<void>;
@@ -127,6 +139,8 @@ export function useBrew(): Ctx {
 
 let toastSeq = 1;
 
+const DEFAULT_PREFS: Preferences = { cleanupAfterUpdate: true, autoUpdate: true, autoUpdateForcedOff: false };
+
 export function BrewProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<Status | null>(null);
   const [pkgs, setPkgs] = useState<Pkg[]>([]);
@@ -146,6 +160,8 @@ export function BrewProvider({ children }: { children: ReactNode }) {
   const [focusJob, setFocusJob] = useState<number | null>(null);
   const [confirming, setConfirming] = useState<Ctx["confirming"]>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [prefs, setPrefs] = useState<Preferences | null>(null);
+  const [everythingIds, setEverythingIds] = useState<number[]>([]);
 
   const [remote, setRemote] = useState<Ref | null>(null);
   const [mapKey, setMapKey] = useState<string | null>(null);
@@ -220,6 +236,9 @@ export function BrewProvider({ children }: { children: ReactNode }) {
     Brew.Security()
       .then((s) => setSecurity(s))
       .catch(() => {});
+    Brew.Preferences()
+      .then((p) => setPrefs(p))
+      .catch(() => {});
     // A clicked notification opens a view, whether it launched the app or
     // arrived while it was open.
     const go = (v: unknown) => {
@@ -292,14 +311,26 @@ export function BrewProvider({ children }: { children: ReactNode }) {
           })
           .catch((e) => toast({ tone: "error", text: `Leftovers not removed: ${errorMessage(e)}` }));
       }
+      // New lists are worth showing straight away, even mid-chain while the
+      // full refresh waits for the remaining jobs.
+      if (raw.command === "brew update" && raw.status === "done") {
+        Brew.Status()
+          .then((st) => st && setStatus(st))
+          .catch(() => {});
+      }
       if (raw.status === "done") {
-        if (raw.mutates) toast({ tone: "ok", text: `${raw.title} — done`, jobId: raw.id });
+        // An automatic check is routine; only its failure is worth a toast.
+        if (raw.mutates && !isAutomatic(raw)) toast({ tone: "ok", text: `${raw.title} — done`, jobId: raw.id });
       } else if (raw.status === "cancelled" && raw.startedAt) {
         toast({ tone: "info", text: `${raw.title} — stopped` });
       } else if (raw.status === "failed") {
         toast({
           tone: "error",
-          text: !raw.needsSudo
+          text: raw.offline
+            ? raw.command === "brew update"
+              ? "Couldn't reach Homebrew. Are you offline?"
+              : `${raw.title} couldn't connect. Are you offline?`
+            : !raw.needsSudo
             ? `${raw.title} failed`
             : raw.sudoIssue === "cancelled"
               ? `${raw.title} — password prompt cancelled`
@@ -479,6 +510,41 @@ export function BrewProvider({ children }: { children: ReactNode }) {
   );
 
   const updateIndex = useCallback(() => guard(async () => void (await Brew.UpdateIndex())), [guard]);
+
+  const everything = useMemo(
+    () => everythingIds.map((id) => jobs.find((j) => j.id === id)).filter((j): j is Job => !!j),
+    [everythingIds, jobs],
+  );
+  const updatingEverything = everything.some(isActive);
+  const cleanupAfterUpdate = prefs?.cleanupAfterUpdate ?? true;
+  const updateEverything = useCallback(
+    () =>
+      guard(async () => {
+        const js = ((await Brew.UpdateEverything(cleanupAfterUpdate)) ?? []).map(toJob);
+        setEverythingIds(js.map((j) => j.id));
+        // Bare `brew upgrade` acts on everything outdated that isn't pinned.
+        const upgradeJob = js.find((j) => j.command === "brew upgrade");
+        track(upgradeJob, pkgs.filter((p) => p.outdated && !p.pinned).map((p) => p.key));
+        return js;
+      }),
+    [guard, track, pkgs, cleanupAfterUpdate],
+  );
+  // Shows the change at once, and puts it back if it couldn't be saved.
+  const savePref = useCallback(
+    (key: "cleanupAfterUpdate" | "autoUpdate", on: boolean, save: (on: boolean) => Promise<Preferences>) =>
+      guard(async () => {
+        setPrefs((p) => ({ ...(p ?? DEFAULT_PREFS), [key]: on }));
+        try {
+          setPrefs(await save(on));
+        } catch (e) {
+          setPrefs((p) => ({ ...(p ?? DEFAULT_PREFS), [key]: !on }));
+          throw e;
+        }
+      }),
+    [guard],
+  );
+  const setCleanupAfterUpdate = useCallback((on: boolean) => savePref("cleanupAfterUpdate", on, Brew.SetCleanupAfterUpdate), [savePref]);
+  const setAutoUpdate = useCallback((on: boolean) => savePref("autoUpdate", on, Brew.SetAutoUpdate), [savePref]);
   const autoremove = useCallback(
     () =>
       guard(async () => {
@@ -576,6 +642,12 @@ export function BrewProvider({ children }: { children: ReactNode }) {
     watchUninstall,
     setPinned,
     updateIndex,
+    updateEverything,
+    everything,
+    updatingEverything,
+    prefs,
+    setCleanupAfterUpdate,
+    setAutoUpdate,
     autoremove,
     cleanupNow,
     doctor,

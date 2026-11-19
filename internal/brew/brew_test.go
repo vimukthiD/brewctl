@@ -534,3 +534,27 @@ func TestCaskReceiptTime(t *testing.T) {
 		t.Errorf("no caskroom = %d, want 0", got)
 	}
 }
+
+// A failure early in a linear chain skips every later step, not just the next.
+func TestRunnerChainSkipsRest(t *testing.T) {
+	fake := filepath.Join(t.TempDir(), "brew")
+	os.WriteFile(fake, []byte("#!/bin/sh\nexit \"$1\"\n"), 0o755)
+	r := NewRunner(&Client{Path: fake}, func(string, any) {})
+	update := r.EnqueueWith("Check for updates", Opts{}, "1")
+	upgrade := r.EnqueueWith("Upgrade everything", Opts{After: update.ID}, "0")
+	cleanup := r.EnqueueWith("Clean up", Opts{After: upgrade.ID}, "0")
+	deadline := time.Now().Add(10 * time.Second)
+	status := map[int]string{}
+	for time.Now().Before(deadline) {
+		for _, j := range r.List() {
+			status[j.ID] = j.Status
+		}
+		if s := status[cleanup.ID]; s != StatusQueued && s != StatusRunning && s != "" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if status[update.ID] != StatusFailed || status[upgrade.ID] != StatusCancelled || status[cleanup.ID] != StatusCancelled {
+		t.Errorf("statuses = %v", status)
+	}
+}

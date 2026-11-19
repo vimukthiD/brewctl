@@ -26,8 +26,10 @@ type BrewService struct {
 	leftovers map[string][]brew.Leftover
 
 	security    *brew.SecurityStore
+	prefs       *prefsStore
 	scanning    bool
 	monitorOnce sync.Once
+	autoOnce    sync.Once
 	background  bool   // running as the login agent's check, not the app
 	agentErr    string // why setting up the login agent failed
 
@@ -43,6 +45,9 @@ type Status struct {
 	Path    string `json:"path"`
 	Prefix  string `json:"prefix"`
 	Version string `json:"version"`
+	// ListsUpdatedAt is when `brew update` last refreshed the package lists,
+	// run from Brewctl or a terminal (unix seconds, 0 if unknown).
+	ListsUpdatedAt int64 `json:"listsUpdatedAt"`
 }
 
 // PkgRef names a package; Kind is "formula" or "cask".
@@ -88,6 +93,9 @@ func (s *BrewService) ready(ctx context.Context) (*brew.Client, *brew.Runner, er
 	if !s.background {
 		s.monitorOnce.Do(func() { go s.monitor() })
 	}
+	if s.wantsAutoUpdate() {
+		s.autoOnce.Do(func() { go s.autoUpdate() })
+	}
 	return s.client, s.runner, nil
 }
 
@@ -97,7 +105,11 @@ func (s *BrewService) Status(ctx context.Context) Status {
 	if err != nil {
 		return Status{Error: err.Error()}
 	}
-	return Status{Found: true, Path: c.Path, Prefix: c.Prefix, Version: c.Version}
+	st := Status{Found: true, Path: c.Path, Prefix: c.Prefix, Version: c.Version}
+	if t := c.ListsUpdatedAt(); !t.IsZero() {
+		st.ListsUpdatedAt = t.Unix()
+	}
+	return st
 }
 
 // Snapshot returns the installed inventory, freshly read from brew.
@@ -183,6 +195,33 @@ func (s *BrewService) UpdateIndex(ctx context.Context) (brew.Job, error) {
 		return brew.Job{}, err
 	}
 	return r.Enqueue("Check for updates", true, "update"), nil
+}
+
+// UpdateEverything does what `brew update && brew upgrade && brew cleanup`
+// does in a terminal, as chained jobs: each step runs only if the one before
+// it succeeded. Cleanup is left out unless asked for.
+func (s *BrewService) UpdateEverything(ctx context.Context, cleanup bool) ([]brew.Job, error) {
+	_, r, err := s.ready(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return enqueueUpdateEverything(r, cleanup), nil
+}
+
+// jobQueue is the part of brew.Runner that queues mutating jobs.
+type jobQueue interface {
+	EnqueueWith(title string, o brew.Opts, args ...string) brew.Job
+}
+
+func enqueueUpdateEverything(q jobQueue, cleanup bool) []brew.Job {
+	update := q.EnqueueWith("Check for updates", brew.Opts{}, "update")
+	// Bare, as in a terminal: brew itself leaves pinned packages alone.
+	upgrade := q.EnqueueWith("Upgrade everything", brew.Opts{After: update.ID}, "upgrade")
+	jobs := []brew.Job{update, upgrade}
+	if cleanup {
+		jobs = append(jobs, q.EnqueueWith("Clean up", brew.Opts{After: upgrade.ID}, "cleanup"))
+	}
+	return jobs
 }
 
 // Upgrade upgrades the given packages: one job for formulae, one for casks.

@@ -1,10 +1,133 @@
-import { CheckCircle2, RefreshCw } from "lucide-react";
-import { Button, CommandHint, Empty, PkgTags } from "../components";
-import { atLatest, caskVer, isActive, onDisk, timeAgo, updatedItself, type Pkg } from "../lib/api";
+import { ArrowUpCircle, CheckCircle2, RefreshCw, Zap } from "lucide-react";
+import { Button, ChainProgress, CommandHint, Empty, PkgTags, Spinner, Switch } from "../components";
+import { atLatest, caskVer, isActive, isAutomatic, onDisk, timeAgo, updatedItself, type Pkg } from "../lib/api";
 import { useBrew } from "../state";
 
+const longDate = (unix: number) => new Date(unix * 1000).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+
+const NO_AUTO_ENV = "BREWCTL_NO_AUTO_UPDATE";
+
+/** Whether Brewctl refreshes the package lists on its own. */
+function AutoUpdateSwitch() {
+  const { prefs, setAutoUpdate } = useBrew();
+  const forced = !!prefs?.autoUpdateForcedOff;
+  return (
+    <Switch
+      on={(prefs?.autoUpdate ?? true) && !forced}
+      onChange={setAutoUpdate}
+      disabled={forced || !prefs}
+      label="Check automatically"
+      title={
+        forced
+          ? `Turned off because ${NO_AUTO_ENV} is set`
+          : "Check for updates automatically: while Brewctl is open, it fetches Homebrew's package lists once they're more than 6 hours old"
+      }
+    />
+  );
+}
+
+/** The up-to-date message: when the lists were checked, and when they will be again. */
+function UpToDateNote() {
+  const { status, prefs } = useBrew();
+  const listsAt = status?.listsUpdatedAt ?? 0;
+  const checked = listsAt ? `Package lists checked ${timeAgo(listsAt)}.` : "Homebrew hasn't fetched its package lists yet.";
+  const next = prefs?.autoUpdateForcedOff
+    ? `Automatic checks are off because ${NO_AUTO_ENV} is set.`
+    : prefs?.autoUpdate ?? true
+      ? "Brewctl checks again on its own once they're 6 hours old."
+      : "Automatic checks are off, so use “Check for updates” to look again.";
+  return (
+    <>
+      {checked} {next}
+    </>
+  );
+}
+
+/** When Homebrew's package lists were last checked, and when Brewctl last read what's installed. */
+export function Freshness() {
+  const { status, fetchedAt, jobs, prefs } = useBrew();
+  const update = jobs.find((j) => j.command === "brew update" && j.status === "running");
+  const listsAt = status?.listsUpdatedAt ?? 0;
+  if (update) {
+    return (
+      <span className="fresh is-checking">
+        <Spinner size={11} />
+        {isAutomatic(update) ? "Package lists are old, checking Homebrew for new versions…" : "Checking Homebrew for new versions…"}
+      </span>
+    );
+  }
+  return (
+    <span className="fresh">
+      <span title={listsAt ? `Homebrew last fetched its package lists ${longDate(listsAt)}, from Brewctl or Terminal` : "Homebrew hasn't fetched its package lists on this Mac yet"}>
+        {listsAt ? `Package lists checked ${timeAgo(listsAt)}` : "Package lists not checked yet"}
+      </span>
+      {fetchedAt ? (
+        <>
+          <span className="fresh-sep" aria-hidden>
+            ·
+          </span>
+          <span title={`Brewctl read what's installed ${longDate(fetchedAt)}`}>Read from Homebrew {timeAgo(fetchedAt)}</span>
+        </>
+      ) : null}
+      {prefs?.autoUpdateForcedOff && (
+        <>
+          <span className="fresh-sep" aria-hidden>
+            ·
+          </span>
+          <span title={`Turned off because ${NO_AUTO_ENV} is set`}>Automatic checks off</span>
+        </>
+      )}
+    </span>
+  );
+}
+
+/** One click for the usual Terminal routine: update, upgrade, and optionally clean up. */
+function UpdateEverything() {
+  const { updateEverything, everything, updatingEverything, prefs, setCleanupAfterUpdate, showJob } = useBrew();
+  const cleanup = prefs?.cleanupAfterUpdate ?? true;
+  const failed = !updatingEverything ? everything.find((j) => j.status === "failed") : undefined;
+  const command = `brew update && brew upgrade${cleanup ? " && brew cleanup" : ""}`;
+
+  return (
+    <section className="card everything">
+      <header className="card-head">
+        <div>
+          <h2>Update everything</h2>
+          <p className="card-sub">
+            Gets the latest package lists, then upgrades everything that isn't pinned{cleanup ? " and clears old versions" : ""}. Each step runs only if the one before it worked.
+          </p>
+        </div>
+        <div className="everything-actions">
+          <label className="check" title="Runs brew cleanup after upgrading, removing old versions and stale downloads">
+            <input type="checkbox" checked={cleanup} disabled={updatingEverything} onChange={(e) => setCleanupAfterUpdate(e.target.checked)} />
+            Clean up afterwards
+          </label>
+          <Button variant="primary" icon={<Zap size={14} />} busy={updatingEverything} onClick={updateEverything}>
+            Update everything
+          </Button>
+        </div>
+      </header>
+      {updatingEverything ? (
+        <ChainProgress jobs={everything} />
+      ) : (
+        <>
+          {failed && (
+            <p className="everything-failed" role="alert">
+              The last run stopped at “{failed.title}”, so the steps after it were skipped.{" "}
+              <button type="button" className="md-link" onClick={() => showJob(failed.id)}>
+                Show output
+              </button>
+            </p>
+          )}
+          <CommandHint command={command} />
+        </>
+      )}
+    </section>
+  );
+}
+
 export function Updates() {
-  const { pkgs, upgrade, updateIndex, busy, select, jobs, fetchedAt, loading } = useBrew();
+  const { pkgs, upgrade, updateIndex, busy, select, jobs, loading, updatingEverything } = useBrew();
 
   const outdated = pkgs.filter((p) => p.outdated);
   const upgradable = outdated.filter((p) => !p.pinned);
@@ -64,6 +187,7 @@ export function Updates() {
         size="sm"
         variant="ghost"
         busy={busy.has(p.key)}
+        disabled={updatingEverything}
         title={`Reinstall ${p.latest} through Homebrew so its record matches. Quit the app first.`}
         onClick={() => upgrade([p])}
       >
@@ -77,25 +201,25 @@ export function Updates() {
       <div className="bar">
         <div className="bar-text">
           <strong>{loading ? "Checking…" : upgradable.length ? `${upgradable.length} update${upgradable.length === 1 ? "" : "s"} available` : outdated.length ? "Nothing to upgrade" : "Everything is up to date"}</strong>
-          <span>
-            {!upgradable.length && outdated.length ? `${outdated.length} pinned package${outdated.length === 1 ? " is" : "s are"} held back · ` : ""}
-            {fetchedAt ? `Read from Homebrew ${timeAgo(fetchedAt)}` : ""}
-          </span>
+          {!upgradable.length && outdated.length ? <span>{`${outdated.length} pinned package${outdated.length === 1 ? " is" : "s are"} held back`}</span> : null}
+          <Freshness />
         </div>
-        <Button icon={<RefreshCw size={14} />} busy={checking} onClick={updateIndex}>
+        <AutoUpdateSwitch />
+        <Button icon={<RefreshCw size={14} />} busy={checking} disabled={updatingEverything} onClick={updateIndex}>
           Check for updates
         </Button>
         {upgradable.length > 0 && (
-          <Button variant="primary" busy={anyBusy} onClick={() => upgrade(upgradable)}>
-            Upgrade all
+          <Button icon={<ArrowUpCircle size={14} />} busy={anyBusy && !updatingEverything} disabled={updatingEverything} onClick={() => upgrade(upgradable)}>
+            Upgrade all <span className="btn-count">{upgradable.length}</span>
           </Button>
         )}
       </div>
 
+      <UpdateEverything />
+
       {!loading && outdated.length === 0 && (
         <Empty icon={<CheckCircle2 size={28} />} title="You're up to date">
-          “Check for updates” asks Homebrew for the latest package list.
-          <CommandHint command="brew update && brew outdated" />
+          <UpToDateNote />
         </Empty>
       )}
 
